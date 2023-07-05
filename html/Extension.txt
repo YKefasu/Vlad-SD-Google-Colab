@@ -1,0 +1,11 @@
+https://github.com/nonnonstop/sd-webui-3d-open-pose-editor
+https://github.com/deforum-art/sd-webui-deforum
+https://github.com/ashen-sensored/stable-diffusion-webui-two-shot
+https://github.com/thomasasfk/sd-webui-aspect-ratio-helper
+https://github.com/tjm35/asymmetric-tiling-sd-webui
+https://github.com/DominikDoom/a1111-sd-webui-tagcomplete
+https://github.com/ashen-sensored/sd_webui_SAG
+https://github.com/jexom/sd-webui-depth-lib
+https://github.com/camenduru/stable-diffusion-webui-huggingface
+https://github.com/kohya-ss/sd-webui-additional-networks
+https://github.com/zanllp/sd-webui-infinite-image-browsing
