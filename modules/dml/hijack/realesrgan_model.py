@@ -4,7 +4,7 @@ import torch
 from realesrgan import RealESRGANer
 
 
-# DML Solution: Some of contents of output tensor turn to 0 after Extended Slices. Move it to cpu.
+# DML Solution: Some tensors turn 0 after Extended Slices. Move output to cpu and get it back.
 def tile_process(self):
     batch, channel, height, width = self.img.shape
     output_height = height * self.scale
@@ -12,7 +12,7 @@ def tile_process(self):
     output_shape = (batch, channel, output_height, output_width)
 
     # start with black image
-    self.output = self.img.new_zeros(output_shape)
+    self.output = self.img.new_zeros(output_shape, device='cpu')
     tiles_x = math.ceil(width / self.tile_size)
     tiles_y = math.ceil(height / self.tile_size)
 
@@ -38,12 +38,13 @@ def tile_process(self):
             input_tile_width = input_end_x - input_start_x
             input_tile_height = input_end_y - input_start_y
             tile_idx = y * tiles_x + x + 1
-            input_tile = self.img[0:self.img.shape[0], 0:self.img.shape[1], input_start_y_pad:input_end_y_pad, input_start_x_pad:input_end_x_pad]
+            input_tile = self.img[:, :, input_start_y_pad:input_end_y_pad, input_start_x_pad:input_end_x_pad]
 
             # upscale tile
             try:
                 with torch.no_grad():
                     output_tile = self.model(input_tile)
+                    output_tile = output_tile.cpu()
             except RuntimeError as error:
                 print('Error', error)
             print(f'\tTile {tile_idx}/{tiles_x * tiles_y}')
@@ -60,8 +61,9 @@ def tile_process(self):
             output_start_y_tile = (input_start_y - input_start_y_pad) * self.scale
             output_end_y_tile = output_start_y_tile + input_tile_height * self.scale
 
-            self.output = self.output.cpu()
             # put tile into output image
-            self.output[0:self.output.shape[0], 0:self.output.shape[1], output_start_y:output_end_y, output_start_x:output_end_x] = output_tile.cpu()[0:output_tile.shape[0], 0:output_tile.shape[1], output_start_y_tile:output_end_y_tile, output_start_x_tile:output_end_x_tile]
-            self.output = self.output.to(output_tile.device)
+            self.output[:, :, output_start_y:output_end_y,
+                        output_start_x:output_end_x] = output_tile[:, :, output_start_y_tile:output_end_y_tile,
+                                                                    output_start_x_tile:output_end_x_tile]
+    self.output = self.output.to(self.device)
 RealESRGANer.tile_process = tile_process

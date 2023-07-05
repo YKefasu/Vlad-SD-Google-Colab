@@ -60,11 +60,8 @@ class Extension:
                 self.remote = next(repo.remote().urls, None)
                 head = repo.head.commit
                 self.commit_date = repo.head.commit.committed_date
-                try:
-                    if repo.active_branch:
-                        self.branch = repo.active_branch.name
-                except Exception:
-                    pass
+                if repo.active_branch:
+                    self.branch = repo.active_branch.name
                 self.commit_hash = head.hexsha
                 self.version = f"<p>{self.commit_hash[:8]}</p><p>{datetime.fromtimestamp(self.commit_date).strftime('%a %b%d %Y %H:%M')}</p>"
             except Exception as ex:
@@ -89,7 +86,7 @@ class Extension:
     def check_updates(self):
         try:
             repo = git.Repo(self.path)
-        except Exception:
+        except:
             self.can_update = False
             return
         for fetch in repo.remote().fetch(dry_run=True):

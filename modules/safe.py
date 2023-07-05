@@ -6,7 +6,7 @@ import zipfile
 import re
 
 import torch
-import numpy as np
+import numpy
 import _codecs
 
 # PyTorch 1.13 and later have _TypedStorage renamed to TypedStorage
@@ -43,9 +43,9 @@ class RestrictedUnpickler(pickle.Unpickler):
         if module == 'torch.nn.modules.container' and name in ['ParameterDict']:
             return getattr(torch.nn.modules.container, name)
         if module == 'numpy.core.multiarray' and name in ['scalar', '_reconstruct']:
-            return getattr(np.core.multiarray, name)
+            return getattr(numpy.core.multiarray, name)
         if module == 'numpy' and name in ['dtype', 'ndarray']:
-            return getattr(np, name)
+            return getattr(numpy, name)
         if module == '_codecs' and name == 'encode':
             return encode
         if module == "pytorch_lightning.callbacks" and name == 'model_checkpoint':
@@ -102,7 +102,7 @@ def check_pt(filename, extra_handler):
 
 
 def load(filename, *args, **kwargs):
-    return load_with_extra(filename, *args, extra_handler=global_extra_handler, **kwargs)
+    return load_with_extra(filename, extra_handler=global_extra_handler, *args, **kwargs)
 
 
 def load_with_extra(filename, extra_handler=None, *args, **kwargs): # pylint: disable=keyword-arg-before-vararg

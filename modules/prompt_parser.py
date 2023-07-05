@@ -7,14 +7,13 @@ from rich import print
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 """
 
-import os
 import re
 from collections import namedtuple
 from typing import List
 import lark
 import torch
 from compel import Compel
-from modules.shared import opts, log
+from modules.shared import opts
 
 # a prompt like this: "fantasy landscape with a [mountain:lake:0.25] and [an oak:a christmas tree:0.75][ in foreground::0.6][ in background:0.25] [shoddy:masterful:0.5]"
 # will be represented with prompt_schedule like this (assuming steps=100):
@@ -68,9 +67,6 @@ re_attention_v1 = re.compile(r"""
 """, re.X)
 
 
-debug_output = os.environ.get('SD_PROMPT_DEBUG', None)
-debug = log.info if debug_output is not None else lambda *args, **kwargs: None
-
 
 def get_learned_conditioning_prompt_schedules(prompts, steps):
     """
@@ -102,18 +98,18 @@ def get_learned_conditioning_prompt_schedules(prompts, steps):
     """
 
     def collect_steps(steps, tree):
-        res = [steps]
+        l = [steps]
         class CollectSteps(lark.Visitor):
             def scheduled(self, tree):
                 tree.children[-1] = float(tree.children[-1])
                 if tree.children[-1] < 1:
                     tree.children[-1] *= steps
                 tree.children[-1] = min(steps, int(tree.children[-1]))
-                res.append(tree.children[-1])
+                l.append(tree.children[-1])
             def alternate(self, tree): # pylint: disable=unused-argument
-                res.extend(range(1, steps+1))
+                l.extend(range(1, steps+1))
         CollectSteps().visit(tree)
-        return sorted(set(res))
+        return sorted(set(l))
 
     def at_step(step, tree):
         class AtStep(lark.Transformer):
@@ -165,7 +161,7 @@ def get_learned_conditioning(model, prompts, steps):
     prompt_schedules = get_learned_conditioning_prompt_schedules(prompts, steps)
     cache = {}
     for prompt, prompt_schedule in zip(prompts, prompt_schedules):
-        debug(f'Prompt schedule: {prompt_schedule}')
+        # log.debug(f'Prompt schedule: {prompt_schedule}')
         cached = cache.get(prompt, None)
         if cached is not None:
             res.append(cached)
@@ -243,12 +239,12 @@ def reconstruct_multicond_batch(c: MulticondLearnedConditioning, current_step):
     param = c.batch[0][0].schedules[0].cond
     tensors = []
     conds_list = []
-    for composable_prompts in c.batch:
+    for _batch_no, composable_prompts in enumerate(c.batch):
         conds_for_batch = []
-        for composable_prompt in composable_prompts:
+        for _cond_index, composable_prompt in enumerate(composable_prompts):
             target_index = 0
-            for current, entry in enumerate(composable_prompt.schedules):
-                if current_step <= entry.end_at_step:
+            for current, (end_at, _cond) in enumerate(composable_prompt.schedules):
+                if current_step <= end_at:
                     target_index = current
                     break
             conds_for_batch.append((len(tensors), composable_prompt.weight))
@@ -303,7 +299,7 @@ def parse_prompt_attention(text):
     square_brackets = []
     if opts.prompt_attention == 'Fixed attention':
         res = [[text, 1.0]]
-        debug(f'Prompt parse-attention: {opts.prompt_attention} {res}')
+        # log.debug(f'Prompt parse-attention: {opts.prompt_attention} {res}')
         return res
     elif opts.prompt_attention == 'Compel parser':
         conjunction = Compel.parse_prompt_string(text)
@@ -312,7 +308,7 @@ def parse_prompt_attention(text):
         res = []
         for frag in conjunction.prompts[0].children:
             res.append([frag.text, frag.weight])
-        debug(f'Prompt parse-attention: {opts.prompt_attention} {res}')
+        # log.debug(f'Prompt parse-attention: {opts.prompt_attention} {res}')
         return res
     elif opts.prompt_attention == 'A1111 parser':
         re_attention = re_attention_v1
@@ -367,7 +363,7 @@ def parse_prompt_attention(text):
             res.pop(i + 1)
         else:
             i += 1
-    debug(f'Prompt parse-attention: {opts.prompt_attention} {res}')
+    # log.debug(f'Prompt parse-attention: {opts.prompt_attention} {res}')
     return res
 
 if __name__ == "__main__":

@@ -173,10 +173,6 @@ class PNGInfoResponse(BaseModel):
     info: str = Field(title="Image info", description="A string with the parameters used to generate the image")
     items: dict = Field(title="Items", description="An object containing all the info the image had")
 
-class LogRequest(BaseModel):
-    lines: int = Field(default=100, title="Lines", description="How many lines to return")
-    clear: bool = Field(default=False, title="Clear", description="Should the log be cleared after returning the lines?")
-
 class ProgressRequest(BaseModel):
     skip_current_image: bool = Field(default=False, title="Skip current image", description="Skip current image serialization")
 
@@ -224,7 +220,7 @@ for key in _options:
         _type = str
         if _options[key].default is not None:
             _type = type(_options[key].default)
-        flags.update({flag.dest: (_type, Field(default=flag.default, description=flag.help))})
+        flags.update({flag.dest: (_type,Field(default=flag.default, description=flag.help))})
 
 FlagsModel = create_model("Flags", **flags)
 
@@ -287,21 +283,5 @@ class MemoryResponse(BaseModel):
     cuda: dict = Field(title="CUDA", description="nVidia CUDA memory stats")
 
 class ScriptsList(BaseModel):
-    txt2img: list = Field(default=None, title="Txt2img", description="Titles of scripts (txt2img)")
-    img2img: list = Field(default=None, title="Img2img", description="Titles of scripts (img2img)")
-
-
-class ScriptArg(BaseModel):
-    label: str = Field(default=None, title="Label", description="Name of the argument in UI")
-    value: Optional[Any] = Field(default=None, title="Value", description="Default value of the argument")
-    minimum: Optional[Any] = Field(default=None, title="Minimum", description="Minimum allowed value for the argumentin UI")
-    maximum: Optional[Any] = Field(default=None, title="Minimum", description="Maximum allowed value for the argumentin UI")
-    step: Optional[Any] = Field(default=None, title="Minimum", description="Step for changing value of the argumentin UI")
-    choices: Optional[List[str]] = Field(default=None, title="Choices", description="Possible values for the argument")
-
-
-class ScriptInfo(BaseModel):
-    name: str = Field(default=None, title="Name", description="Script name")
-    is_alwayson: bool = Field(default=None, title="IsAlwayson", description="Flag specifying whether this script is an alwayson script")
-    is_img2img: bool = Field(default=None, title="IsImg2img", description="Flag specifying whether this script is an img2img script")
-    args: List[ScriptArg] = Field(title="Arguments", description="List of script's arguments")
+    txt2img: list = Field(default=None,title="Txt2img", description="Titles of scripts (txt2img)")
+    img2img: list = Field(default=None,title="Img2img", description="Titles of scripts (img2img)")

@@ -1,6 +1,6 @@
 function keyupEditAttention(event) {
   const target = event.originalTarget || event.composedPath()[0];
-  if (!target.matches("*:is([id*='_toprow'] [id*='_prompt'], .prompt) textarea")) return;
+  if (!target.matches("[id*='_toprow'] [id*='_prompt'] textarea")) return;
   if (!(event.metaKey || event.ctrlKey)) return;
   const isPlus = event.key === 'ArrowUp';
   const isMinus = event.key === 'ArrowDown';
@@ -79,12 +79,16 @@ function keyupEditAttention(event) {
   weight = parseFloat(weight.toPrecision(12));
   if (String(weight).length === 1) weight += '.0';
 
+  console.log('HERE', closeCharacter, weight);
   if (closeCharacter == ')' && weight == 1) {
+    console.log('HERE2');
     text = text.slice(0, selectionStart - 1) + text.slice(selectionStart, selectionEnd) + text.slice(selectionEnd + 5);
     selectionStart--;
     selectionEnd--;
+    console.log('HERE2', text);
   } else {
     text = text.slice(0, selectionEnd + 1) + weight + text.slice(selectionEnd + 1 + end - 1);
+    console.log('HERE3', text);
   }
 
   target.focus();

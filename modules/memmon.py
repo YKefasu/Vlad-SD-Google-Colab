@@ -2,7 +2,7 @@ import threading
 import time
 from collections import defaultdict
 import torch
-from modules import devices
+from modules import shared
 
 
 class MemUsageMonitor(threading.Thread):
@@ -22,9 +22,9 @@ class MemUsageMonitor(threading.Thread):
         self.data = defaultdict(int)
         if not torch.cuda.is_available():
             #torch.cuda.is_available() reports False when using IPEX.
-            if devices.backend == 'ipex':
+            if shared.cmd_opts.use_ipex:
                 self.cuda_mem_get_info()
-                torch.xpu.memory_stats(self.device)
+                torch.xpu.memory_stats("xpu")
             else:
                 self.disabled = True
         else:
@@ -35,9 +35,9 @@ class MemUsageMonitor(threading.Thread):
                 self.disabled = True
 
     def cuda_mem_get_info(self):
-        if devices.backend == 'ipex':
-            index = self.device.index if self.device.index is not None else torch.xpu.current_device()
-            return [(torch.xpu.get_device_properties(index).total_memory - torch.xpu.memory_allocated(index)), torch.xpu.get_device_properties(index).total_memory]
+        if shared.cmd_opts.use_ipex:
+            #-128MB for the OS and other.
+            return [(torch.xpu.get_device_properties("xpu").total_memory - torch.xpu.memory_allocated() - (128*1024*1024)), torch.xpu.get_device_properties("xpu").total_memory]
         else:
             index = self.device.index if self.device.index is not None else torch.cuda.current_device()
             return torch.cuda.mem_get_info(index)
@@ -47,7 +47,7 @@ class MemUsageMonitor(threading.Thread):
             return
         while True:
             self.run_flag.wait()
-            if devices.backend == 'ipex':
+            if shared.cmd_opts.use_ipex:
                 torch.xpu.reset_peak_memory_stats()
             else:
                 torch.cuda.reset_peak_memory_stats()
@@ -70,8 +70,8 @@ class MemUsageMonitor(threading.Thread):
             self.data["free"] = free
             self.data["total"] = total
             try:
-                if devices.backend == 'ipex':
-                    torch_stats = torch.xpu.memory_stats(self.device)
+                if shared.cmd_opts.use_ipex:
+                    torch_stats = torch.xpu.memory_stats("xpu")
                 else:
                     torch_stats = torch.cuda.memory_stats(self.device)
                 self.data["active"] = torch_stats["active.all.current"]
@@ -79,7 +79,7 @@ class MemUsageMonitor(threading.Thread):
                 self.data["reserved"] = torch_stats["reserved_bytes.all.current"]
                 self.data["reserved_peak"] = torch_stats["reserved_bytes.all.peak"]
                 self.data["system_peak"] = total - self.data["min_free"]
-            except Exception:
+            except:
                 self.disabled = True
         return self.data
 

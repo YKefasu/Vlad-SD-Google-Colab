@@ -57,7 +57,6 @@ def grid(data):
         log.info({ 'grid': { 'name': f, 'size': image.size, 'images': len(data.image) } })
         image.save(f, 'JPEG', exif = exif(data.info, None, 'grid'), optimize = True, quality = 70)
         return image
-    return data.image
 
 
 def exif(info, i = None, op = 'generate'):
@@ -73,7 +72,7 @@ def exif(info, i = None, op = 'generate'):
         template += ' | grid {num}'.format(num = sd.generate.batch_size * sd.generate.n_iter) # pylint: disable=consider-using-f-string
     ifd = ImageFileDirectory_v2()
     exif_stream = io.BytesIO()
-    _TAGS = {v: k for k, v in TAGS.items()} # enumerate possible exif tags
+    _TAGS = dict(((v, k) for k, v in TAGS.items())) # enumerate possible exif tags
     ifd[_TAGS['ImageDescription']] = template
     ifd.save(exif_stream)
     val = b'Exif\x00\x00' + exif_stream.getvalue()
@@ -128,8 +127,6 @@ async def generate(prompt = None, options = None, quiet = False): # pylint: disa
         sd.generate.prompt = prompt
     if not quiet:
         log.info({ 'generate': sd.generate })
-    if sd.get('options', None) is None:
-        sd['options'] = await get('/sdapi/v1/options')
     names = []
     b64s = []
     images = []
@@ -281,7 +278,7 @@ def args(): # parse cmd arguments
                     data = json.load(f)
                     random = Map(data)
                     log.debug({ 'random template': sd })
-            except Exception:
+            except:
                 log.error({ 'random template error': params.random})
                 exit()
         elif os.path.isfile(os.path.join(home, params.random)):
@@ -290,7 +287,7 @@ def args(): # parse cmd arguments
                     data = json.load(f)
                     random = Map(data)
                     log.debug({ 'random template': sd })
-            except Exception:
+            except:
                 log.error({ 'random template error': params.random})
                 exit()
         else:
@@ -340,7 +337,7 @@ async def main():
         scheduler = sampler(params, options)
         t0 = time.perf_counter()
         data = await generate() # generate returns list of images
-        if 'image' not in data:
+        if not 'image' in data:
             break
         stats.images += len(data.image)
         t1 = time.perf_counter()
@@ -371,3 +368,10 @@ if __name__ == '__main__':
         log.info({ 'sampler performance': avg })
         log.info({ 'stats' : stats })
         asyncio.run(close())
+'''
+    except Exception as e:
+        log.info({ 'sampler performance': avg })
+        log.info({ 'stats': stats })
+        log.critical({ 'exception': e })
+        exit()
+'''

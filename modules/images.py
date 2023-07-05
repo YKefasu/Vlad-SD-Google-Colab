@@ -4,7 +4,6 @@ import re
 import os
 import math
 import json
-import uuid
 import string
 import hashlib
 import queue
@@ -62,25 +61,37 @@ Grid = namedtuple("Grid", ["tiles", "tile_w", "tile_h", "image_w", "image_h", "o
 def split_grid(image, tile_w=512, tile_h=512, overlap=64):
     w = image.width
     h = image.height
+
     non_overlap_width = tile_w - overlap
     non_overlap_height = tile_h - overlap
+
     cols = math.ceil((w - overlap) / non_overlap_width)
     rows = math.ceil((h - overlap) / non_overlap_height)
+
     dx = (w - tile_w) / (cols - 1) if cols > 1 else 0
     dy = (h - tile_h) / (rows - 1) if rows > 1 else 0
+
     grid = Grid([], tile_w, tile_h, w, h, overlap)
     for row in range(rows):
         row_images = []
+
         y = int(row * dy)
+
         if y + tile_h >= h:
             y = h - tile_h
+
         for col in range(cols):
             x = int(col * dx)
+
             if x + tile_w >= w:
                 x = w - tile_w
+
             tile = image.crop((x, y, x + tile_w, y + tile_h))
+
             row_images.append([x, tile_w, tile])
+
         grid.tiles.append([y, tile_h, row_images])
+
     return grid
 
 
@@ -92,6 +103,7 @@ def combine_grid(grid):
 
     mask_w = make_mask_image(np.arange(grid.overlap, dtype=np.float32).reshape((1, grid.overlap)).repeat(grid.tile_h, axis=0))
     mask_h = make_mask_image(np.arange(grid.overlap, dtype=np.float32).reshape((grid.overlap, 1)).repeat(grid.image_w, axis=1))
+
     combined_image = Image.new("RGB", (grid.image_w, grid.image_h))
     for y, h, row in grid.tiles:
         combined_row = Image.new("RGB", (grid.image_w, h))
@@ -99,13 +111,17 @@ def combine_grid(grid):
             if x == 0:
                 combined_row.paste(tile, (0, 0))
                 continue
+
             combined_row.paste(tile.crop((0, 0, grid.overlap, h)), (x, 0), mask=mask_w)
             combined_row.paste(tile.crop((grid.overlap, 0, w, h)), (x + grid.overlap, 0))
+
         if y == 0:
             combined_image.paste(combined_row, (0, 0))
             continue
+
         combined_image.paste(combined_row.crop((0, 0, combined_row.width, grid.overlap)), (0, y), mask=mask_h)
         combined_image.paste(combined_row.crop((0, grid.overlap, combined_row.width, h)), (0, y + grid.overlap))
+
     return combined_image
 
 
@@ -129,12 +145,12 @@ def draw_grid_annotations(im, width, height, hor_texts, ver_texts, margin=0):
 
     def get_font(fontsize):
         try:
-            return ImageFont.truetype(shared.opts.font or 'html/roboto.ttf', fontsize)
+            return ImageFont.truetype(shared.opts.font or 'javascript/roboto.ttf', fontsize)
         except Exception:
-            return ImageFont.truetype('html/roboto.ttf', fontsize)
+            return ImageFont.truetype('javascript/roboto.ttf', fontsize)
 
     def draw_texts(drawing, draw_x, draw_y, lines, initial_fnt, initial_fontsize):
-        for line in lines:
+        for _i, line in enumerate(lines):
             fnt = initial_fnt
             fontsize = initial_fontsize
             while drawing.multiline_textsize(line.text, font=fnt)[0] > line.allowed_width and fontsize > 0:
@@ -273,7 +289,6 @@ def sanitize_filename_part(text, replace_spaces=True):
     text = os.path.basename(text)
     if replace_spaces:
         text = text.replace(' ', '_')
-    text = text.replace('#', '_')
     text = text.translate({ord(x): '_' for x in invalid_filename_chars})
     text = text.lstrip(invalid_filename_prefix)[:max_filename_part_length]
     text = text.rstrip(invalid_filename_postfix)
@@ -282,32 +297,29 @@ def sanitize_filename_part(text, replace_spaces=True):
 
 class FilenameGenerator:
     replacements = {
-        'batch_number': lambda self: NOTHING_AND_SKIP_PREVIOUS_TEXT if self.p.batch_size == 1 else self.p.batch_index + 1,
+        'seed': lambda self: self.seed if self.seed is not None else '',
+        'steps': lambda self: self.p and self.p.steps,
         'cfg': lambda self: self.p and self.p.cfg_scale,
-        'clip_skip': lambda self: self.p and self.p.clip_skip,
-        'date': lambda self: datetime.datetime.now().strftime('%Y-%m-%d'),
-        'datetime': lambda self, *args: self.datetime(*args),  # accepts formats: [datetime], [datetime<Format>], [datetime<Format><Time Zone>]
-        'denoising': lambda self: self.p.denoising_strength if self.p and self.p.denoising_strength else NOTHING_AND_SKIP_PREVIOUS_TEXT,
-        'generation_number': lambda self: NOTHING_AND_SKIP_PREVIOUS_TEXT if self.p.n_iter == 1 and self.p.batch_size == 1 else self.p.iteration * self.p.batch_size + self.p.batch_index + 1,
-        'hasprompt': lambda self, *args: self.hasprompt(*args),  # accepts formats:[hasprompt<prompt1|default><prompt2>..]
+        'width': lambda self: self.image.width,
         'height': lambda self: self.image.height,
-        'image_hash': lambda self: self.image_hash(),
-        'job_timestamp': lambda self: getattr(self.p, "job_timestamp", shared.state.job_timestamp),
-        'model': lambda self: sanitize_filename_part(shared.sd_model.sd_checkpoint_info.name_for_extra, replace_spaces=False),
-        'model_shortname': lambda self: sanitize_filename_part(shared.sd_model.sd_checkpoint_info.name_for_extra, replace_spaces=False),
+        'styles': lambda self: self.p and sanitize_filename_part(", ".join([style for style in self.p.styles if not style == "None"]) or "None", replace_spaces=False),
+        'sampler': lambda self: self.p and sanitize_filename_part(self.p.sampler_name, replace_spaces=False),
         'model_hash': lambda self: getattr(self.p, "sd_model_hash", shared.sd_model.sd_model_hash),
         'model_name': lambda self: sanitize_filename_part(shared.sd_model.sd_checkpoint_info.model_name, replace_spaces=False),
+        'model_shortname': lambda self: sanitize_filename_part(shared.sd_model.sd_checkpoint_info.name_for_extra, replace_spaces=False),
+        'date': lambda self: datetime.datetime.now().strftime('%Y-%m-%d'),
+        'datetime': lambda self, *args: self.datetime(*args),  # accepts formats: [datetime], [datetime<Format>], [datetime<Format><Time Zone>]
+        'job_timestamp': lambda self: getattr(self.p, "job_timestamp", shared.state.job_timestamp),
         'prompt_hash': lambda self: hashlib.sha256(self.prompt.encode()).hexdigest()[0:8],
+        'prompt': lambda self: sanitize_filename_part(self.prompt),
         'prompt_no_styles': lambda self: self.prompt_no_style(),
         'prompt_spaces': lambda self: sanitize_filename_part(self.prompt, replace_spaces=False),
         'prompt_words': lambda self: self.prompt_words(),
-        'prompt': lambda self: sanitize_filename_part(self.prompt),
-        'sampler': lambda self: self.p and sanitize_filename_part(self.p.sampler_name, replace_spaces=False),
-        'seed': lambda self: self.seed if self.seed is not None else '',
-        'steps': lambda self: self.p and self.p.steps,
-        'styles': lambda self: self.p and sanitize_filename_part(", ".join([style for style in self.p.styles if not style == "None"]) or "None", replace_spaces=False),
-        'uuid': lambda self: str(uuid.uuid4()),
-        'width': lambda self: self.image.width,
+        'batch_number': lambda self: NOTHING_AND_SKIP_PREVIOUS_TEXT if self.p.batch_size == 1 else self.p.batch_index + 1,
+        'generation_number': lambda self: NOTHING_AND_SKIP_PREVIOUS_TEXT if self.p.n_iter == 1 and self.p.batch_size == 1 else self.p.iteration * self.p.batch_size + self.p.batch_index + 1,
+        'hasprompt': lambda self, *args: self.hasprompt(*args),  # accepts formats:[hasprompt<prompt1|default><prompt2>..]
+        'clip_skip': lambda self: self.p and self.p.clip_skip,
+        'denoising': lambda self: self.p.denoising_strength if self.p and self.p.denoising_strength else NOTHING_AND_SKIP_PREVIOUS_TEXT,
     }
     default_time_format = '%Y%m%d%H%M%S'
 
@@ -333,16 +345,6 @@ class FilenameGenerator:
                     outres = outres if default == "" else f'{outres}{default}'
         return sanitize_filename_part(outres)
 
-    def image_hash(self):
-        if self.image is None:
-            return None
-        import base64
-        from io import BytesIO
-        buffered = BytesIO()
-        self.image.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue())
-        return hashlib.sha256(img_str).hexdigest()[0:8]
-
     def prompt_no_style(self):
         if self.p is None or self.prompt is None:
             return None
@@ -351,11 +353,14 @@ class FilenameGenerator:
             if len(style) > 0:
                 for part in style.split("{prompt}"):
                     prompt_no_style = prompt_no_style.replace(part, "").replace(", ,", ",").strip().strip(',')
+
                 prompt_no_style = prompt_no_style.replace(style, "").strip().strip(',').strip()
         return sanitize_filename_part(prompt_no_style, replace_spaces=False)
 
     def prompt_words(self):
         words = [x for x in re_nonletters.split(self.prompt or "") if len(x) > 0]
+        if len(words) == 0:
+            words = ["empty"]
         return sanitize_filename_part(" ".join(words[0:shared.opts.directories_max_prompt_words]), replace_spaces=False)
 
     def datetime(self, *args):
@@ -363,12 +368,12 @@ class FilenameGenerator:
         time_format = args[0] if len(args) > 0 and args[0] != "" else self.default_time_format
         try:
             time_zone = pytz.timezone(args[1]) if len(args) > 1 else None
-        except pytz.exceptions.UnknownTimeZoneError:
+        except pytz.exceptions.UnknownTimeZoneError as _:
             time_zone = None
         time_zone_time = time_datetime.astimezone(time_zone)
         try:
             formatted_time = time_zone_time.strftime(time_format)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as _:
             formatted_time = time_zone_time.strftime(self.default_time_format)
         return sanitize_filename_part(formatted_time, replace_spaces=False)
 
@@ -398,10 +403,8 @@ class FilenameGenerator:
                 elif replacement is not None:
                     res += text + str(replacement)
                     continue
-            else:
-                res += text + f'[{pattern}]' # reinsert unknown pattern
-            res += f'{text}'
-            res = res.split('?')[0].strip('-').strip()
+            res += f'{text}[{pattern}]'
+            res = res.split('?')[0]
         return res
 
 
@@ -415,9 +418,9 @@ def get_next_sequence_number(path, basename):
     prefix_length = len(basename)
     for p in os.listdir(path):
         if p.startswith(basename):
-            parts = os.path.splitext(p[prefix_length:])[0].split('-')  # splits the filename (removing the basename first if one is defined, so the sequence number is always the first element)
+            l = os.path.splitext(p[prefix_length:])[0].split('-')  # splits the filename (removing the basename first if one is defined, so the sequence number is always the first element)
             try:
-                result = max(int(parts[0]), result)
+                result = max(int(l[0]), result)
             except ValueError:
                 pass
     return result + 1
@@ -426,62 +429,49 @@ def get_next_sequence_number(path, basename):
 def atomically_save_image():
     Image.MAX_IMAGE_PIXELS = None # disable check in Pillow and rely on check below to allow large custom image sizes
     while True:
-        image, filename, extension, params, exifinfo, txt_fullfn = save_queue.get()
+        image, filename, extension, params, exifinfo_data, txt_fullfn = save_queue.get()
         fn = filename + extension
-        filename = filename.strip()
-        if extension[0] != '.': # add dot if missing
-            extension = '.' + extension
-        try:
-            image_format = Image.registered_extensions()[extension]
-        except Exception:
-            shared.log.warning(f'Unknown image format: {extension}')
-            image_format = 'JPEG'
+        image_format = Image.registered_extensions()[extension]
         shared.log.debug(f'Saving image: {image_format} {fn} {image.size}')
         # actual save
-        exifinfo = (exifinfo or "") if shared.opts.image_metadata else ""
         if image_format == 'PNG':
             pnginfo_data = PngImagePlugin.PngInfo()
             for k, v in params.pnginfo.items():
                 pnginfo_data.add_text(k, str(v))
-            image.save(fn, format=image_format, quality=shared.opts.jpeg_quality, pnginfo=pnginfo_data if shared.opts.image_metadata else None)
+            image.save(fn, format=image_format, quality=shared.opts.jpeg_quality, pnginfo=pnginfo_data)
         elif image_format == 'JPEG':
             if image.mode == 'RGBA':
                 shared.log.warning('Saving RGBA image as JPEG: Alpha channel will be lost')
                 image = image.convert("RGB")
             elif image.mode == 'I;16':
                 image = image.point(lambda p: p * 0.0038910505836576).convert("L")
-            exif_bytes = piexif.dump({ "Exif": { piexif.ExifIFD.UserComment: piexif.helper.UserComment.dump(exifinfo, encoding="unicode") } })
+            exif_bytes = piexif.dump({ "Exif": { piexif.ExifIFD.UserComment: piexif.helper.UserComment.dump(exifinfo_data or "", encoding="unicode") } })
             image.save(fn, format=image_format, quality=shared.opts.jpeg_quality, exif=exif_bytes)
         elif image_format == 'WEBP':
             if image.mode == 'I;16':
                 image = image.point(lambda p: p * 0.0038910505836576).convert("RGB")
-            exif_bytes = piexif.dump({ "Exif": { piexif.ExifIFD.UserComment: piexif.helper.UserComment.dump(exifinfo, encoding="unicode") } })
-            try:
-                image.save(fn, format=image_format, quality=shared.opts.jpeg_quality, lossless=shared.opts.webp_lossless, exif=exif_bytes)
-            except Exception as e:
-                shared.log.warning(f'Image save failed: {fn} {e}')
+            exif_bytes = piexif.dump({ "Exif": { piexif.ExifIFD.UserComment: piexif.helper.UserComment.dump(exifinfo_data or "", encoding="unicode") } })
+            image.save(fn, format=image_format, quality=shared.opts.jpeg_quality, lossless=shared.opts.webp_lossless, exif=exif_bytes)
         else:
-            # shared.log.warning(f'Unrecognized image format: {extension} attempting save as {image_format}')
-            try:
-                image.save(fn, format=image_format, quality=shared.opts.jpeg_quality)
-            except Exception as e:
-                shared.log.warning(f'Image save failed: {fn} {e}')
+            shared.log.warning(f'Unrecognized image format: {extension} attempting save as {image_format}')
+            image.save(fn, format=image_format, quality=shared.opts.jpeg_quality)
         # additional metadata saved in files
-        if shared.opts.save_txt and len(exifinfo) > 0:
-            try:
-                with open(txt_fullfn, "w", encoding="utf8") as file:
-                    file.write(f"{exifinfo}\n")
-            except Exception as e:
-                shared.log.warning(f'Image description save failed: {txt_fullfn} {e}')
+        if shared.opts.save_txt and len(exifinfo_data) > 0:
+            with open(txt_fullfn, "w", encoding="utf8") as file:
+                file.write(f"{exifinfo_data}\n")
         with open(os.path.join(paths.data_path, "params.txt"), "w", encoding="utf8") as file:
-            file.write(exifinfo)
-        if shared.opts.save_log_fn != '' and len(exifinfo) > 0:
+            file.write(exifinfo_data)
+        if shared.opts.save_log_fn != '' and len(exifinfo_data) > 0:
             try:
                 with open(os.path.join(paths.data_path, shared.opts.save_log_fn), mode='a+', encoding='utf-8') as f:
-                    entry = { 'filename': filename, 'time': datetime.datetime.now().isoformat(), 'info': exifinfo }
-                    json.dump(entry, f)
-                    f.write(os.linesep)
-                    shared.log.debug(f'Log file updated: {os.path.join(paths.data_path, shared.opts.save_log_fn)}')
+                    try:
+                        entries = json.load(f)
+                    except:
+                        entries = []
+                    f.seek(0)
+                    entries.append({ 'filename': filename, 'time': datetime.datetime.now().isoformat(), 'info': exifinfo_data })
+                    json.dump(entries, f, indent=4)
+                    del entries
             except Exception as e:
                 shared.log.warning(f'Failed to save log file: {shared.opts.save_log_fn} {e}')
         save_queue.task_done()
@@ -543,19 +533,17 @@ def save_image(image, path, basename, seed=None, prompt=None, extension='jpg', i
         if shared.opts.samples_filename_pattern and len(shared.opts.samples_filename_pattern) > 0:
             file_decoration = shared.opts.samples_filename_pattern
         else:
-            file_decoration = "[seq]-[prompt_words]"
-        # add_number = shared.opts.save_images_add_number or file_decoration == ''
-        # if file_decoration != "" and add_number:
-        #    file_decoration = f"-{file_decoration}"
+            file_decoration = "[seed]-[prompt_spaces]"
+        add_number = shared.opts.save_images_add_number or file_decoration == ''
+        if file_decoration != "" and add_number:
+            file_decoration = f"-{file_decoration}"
         file_decoration = namegen.apply(file_decoration) + suffix
-        if shared.opts.save_images_add_number:
-            if '[seq]' not in file_decoration:
-                file_decoration = f"[seq]-{file_decoration}"
+        if add_number:
             basecount = get_next_sequence_number(path, basename)
             fullfn = None
-            for i in range(9999):
-                seq = f"{basecount + i:05}" if basename == '' else f"{basename}-{basecount + i:04}"
-                fullfn = os.path.join(path, f"{file_decoration.replace('[seq]', seq)}.{extension}")
+            for i in range(500):
+                fn = f"{basecount + i:05}" if basename == '' else f"{basename}-{basecount + i:04}"
+                fullfn = os.path.join(path, f"{fn}{file_decoration}.{extension}")
                 if not os.path.exists(fullfn):
                     break
         else:
@@ -567,21 +555,21 @@ def save_image(image, path, basename, seed=None, prompt=None, extension='jpg', i
         pnginfo[pnginfo_section_name] = info
     params = script_callbacks.ImageSaveParams(image, p, fullfn, pnginfo)
     script_callbacks.before_image_saved_callback(params)
-    exifinfo = params.pnginfo.get('UserComment', '')
-    if len(exifinfo) > 0:
-        exifinfo = exifinfo + ', ' + params.pnginfo.get(pnginfo_section_name, '')
+    exifinfo_data = params.pnginfo.get('UserComment', '')
+    if len(exifinfo_data) > 0:
+        exifinfo_data = exifinfo_data + ', ' + params.pnginfo.get(pnginfo_section_name, '')
     else:
-        exifinfo = params.pnginfo.get(pnginfo_section_name, '')
+        exifinfo_data = params.pnginfo.get(pnginfo_section_name, '')
     filename, extension = os.path.splitext(params.filename)
     if hasattr(os, 'statvfs'):
         max_name_len = os.statvfs(path).f_namemax
         filename = filename[:max_name_len - max(4, len(extension))]
         params.filename = filename + extension
-    txt_fullfn = f"{filename}.txt" if shared.opts.save_txt and len(exifinfo) > 0 else None
+    txt_fullfn = f"{filename}.txt" if shared.opts.save_txt and len(exifinfo_data) > 0 else None
 
-    save_queue.put((params.image, filename, extension, params, exifinfo, txt_fullfn))
+    save_queue.put((params.image, filename, extension, params, exifinfo_data, txt_fullfn))
     save_queue.join()
-    # atomically_save_image(params.image, filename, extension, params, exifinfo, txt_fullfn)
+    # atomically_save_image(params.image, filename, extension, params, exifinfo_data, txt_fullfn)
 
     params.image.already_saved_as = params.filename
     script_callbacks.image_saved_callback(params)
@@ -600,7 +588,7 @@ def safe_decode_string(s: bytes):
             if len(val) == 0: # remove empty strings
                 val = None
             return val
-        except Exception:
+        except:
             pass
     return None
 

@@ -9,6 +9,7 @@ import torch
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 import cv2
+import tomesd
 from skimage import exposure
 from ldm.data.util import AddMiDaS
 from ldm.models.diffusion.ddpm import LatentDepth2ImageDiffusion
@@ -129,8 +130,6 @@ class StableDiffusionProcessing:
         self.override_settings_restore_afterwards = override_settings_restore_afterwards
         self.is_using_inpainting_conditioning = False
         self.disable_extra_networks = False
-        self.token_merging_ratio = 0
-        self.token_merging_ratio_hr = 0
         if not seed_enable_extras:
             self.subseed = -1
             self.subseed_strength = 0
@@ -147,7 +146,6 @@ class StableDiffusionProcessing:
         self.iteration = 0
         self.is_hr_pass = False
         opts.data['clip_skip'] = clip_skip
-
 
     @property
     def sd_model(self):
@@ -239,15 +237,10 @@ class StableDiffusionProcessing:
         pass
 
     def sample(self, conditioning, unconditional_conditioning, seeds, subseeds, subseed_strength, prompts):
-        raise NotImplementedError
+        raise NotImplementedError()
 
     def close(self):
         self.sampler = None # pylint: disable=attribute-defined-outside-init
-
-    def get_token_merging_ratio(self, for_hr=False):
-        if for_hr:
-            return self.token_merging_ratio_hr or opts.token_merging_ratio_hr or self.token_merging_ratio or opts.token_merging_ratio
-        return self.token_merging_ratio or opts.token_merging_ratio
 
 
 class Processed:
@@ -284,7 +277,6 @@ class Processed:
         self.s_tmin = p.s_tmin
         self.s_tmax = p.s_tmax
         self.s_noise = p.s_noise
-        self.s_min_uncond = p.s_min_uncond
         self.sampler_noise_scheduler_override = p.sampler_noise_scheduler_override
         self.prompt = self.prompt if type(self.prompt) != list else self.prompt[0]
         self.negative_prompt = self.negative_prompt if type(self.negative_prompt) != list else self.negative_prompt[0]
@@ -295,8 +287,6 @@ class Processed:
         self.all_negative_prompts = all_negative_prompts or p.all_negative_prompts or [self.negative_prompt]
         self.all_seeds = all_seeds or p.all_seeds or [self.seed]
         self.all_subseeds = all_subseeds or p.all_subseeds or [self.subseed]
-        self.token_merging_ratio = p.token_merging_ratio
-        self.token_merging_ratio_hr = p.token_merging_ratio_hr
         self.infotexts = infotexts or [info]
 
     def js(self):
@@ -334,9 +324,6 @@ class Processed:
 
     def infotext(self, p: StableDiffusionProcessing, index):
         return create_infotext(p, self.all_prompts, self.all_seeds, self.all_subseeds, comments=[], position_in_batch=index % self.batch_size, iteration=index // self.batch_size)
-
-    def get_token_merging_ratio(self, for_hr=False):
-        return self.token_merging_ratio_hr if for_hr else self.token_merging_ratio
 
 
 # from https://discuss.pytorch.org/t/help-regarding-slerp-function-for-generative-model-sampling/32475/3
@@ -438,9 +425,6 @@ def fix_seed(p):
 def create_infotext(p: StableDiffusionProcessing, all_prompts, all_seeds, all_subseeds, comments=None, iteration=0, position_in_batch=0): # pylint: disable=unused-argument
     index = position_in_batch + iteration * p.batch_size
 
-    enable_hr = getattr(p, 'enable_hr', False)
-    token_merging_ratio = p.get_token_merging_ratio()
-    token_merging_ratio_hr = p.get_token_merging_ratio(for_hr=True)
     uses_ensd = opts.eta_noise_seed_delta != 0
     if uses_ensd:
         uses_ensd = sd_samplers_common.is_sampler_using_eta_noise_seed_delta(p)
@@ -466,8 +450,14 @@ def create_infotext(p: StableDiffusionProcessing, all_prompts, all_seeds, all_su
         "ENSD": opts.eta_noise_seed_delta if uses_ensd else None,
         "Init image hash": getattr(p, 'init_img_hash', None),
         "Version": git_commit,
-        "Token merging ratio": None if token_merging_ratio == 0 else token_merging_ratio,
-        "Token merging ratio hr": None if not enable_hr or token_merging_ratio_hr == 0 else token_merging_ratio_hr,
+        "Token merging ratio": None if not (opts.token_merging or cmd_opts.token_merging) or opts.token_merging_hr_only else opts.token_merging_ratio,
+        "Token merging ratio hr": None if not (opts.token_merging or cmd_opts.token_merging) else opts.token_merging_ratio_hr,
+        "Token merging random": None if opts.token_merging_random is False else opts.token_merging_random,
+        "Token merging merge attention": None if opts.token_merging_merge_attention is True else opts.token_merging_merge_attention,
+        "Token merging merge cross attention": None if opts.token_merging_merge_cross_attention is False else opts.token_merging_merge_cross_attention,
+        "Token merging merge mlp": None if opts.token_merging_merge_mlp is False else opts.token_merging_merge_mlp,
+        "Token merging stride x": None if opts.token_merging_stride_x == 2 else opts.token_merging_stride_x,
+        "Token merging stride y": None if opts.token_merging_stride_y == 2 else opts.token_merging_stride_y,
         "Parser": opts.prompt_attention,
     }
     generation_params.update(p.extra_generation_params)
@@ -480,7 +470,7 @@ def create_infotext(p: StableDiffusionProcessing, all_prompts, all_seeds, all_su
 def print_profile(profile, msg: str):
     try:
         from rich import print # pylint: disable=redefined-builtin
-    except Exception:
+    except:
         pass
     lines = profile.key_averages().table(sort_by="cuda_time_total", row_limit=20)
     lines = lines.split('\n')
@@ -494,7 +484,7 @@ def print_profile(profile, msg: str):
     import pstats
     try:
         from rich import print # pylint: disable=redefined-builtin
-    except Exception:
+    except:
         pass
     profile.disable()
     stream = io.StringIO()
@@ -502,7 +492,7 @@ def print_profile(profile, msg: str):
     ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(15)
     profile = None
     lines = stream.getvalue().split('\n')
-    lines = [line for line in lines if '<frozen' not in line and '{built-in' not in line and '/logging' not in line and '/rich' not in line]
+    lines = [l for l in lines if '<frozen' not in l and '{built-in' not in l and '/logging' not in l and '/rich' not in l]
     print(f'Profile {msg}:', '\n'.join(lines))
 
 
@@ -520,7 +510,9 @@ def process_images(p: StableDiffusionProcessing) -> Processed:
             if k == 'sd_vae':
                 sd_vae.reload_vae_weights()
 
-        sd_models.apply_token_merging(p.sd_model, p.get_token_merging_ratio())
+        if (opts.token_merging or cmd_opts.token_merging) and not opts.token_merging_hr_only:
+            sd_models.apply_token_merging(sd_model=p.sd_model, hr=False)
+            log.debug('Token merging applied')
 
         if cmd_opts.profile:
             """
@@ -538,7 +530,9 @@ def process_images(p: StableDiffusionProcessing) -> Processed:
         else:
             res = process_images_inner(p)
     finally:
-        sd_models.apply_token_merging(p.sd_model, 0)
+        if opts.token_merging or cmd_opts.token_merging:
+            tomesd.remove_patch(p.sd_model)
+            log.debug('Token merging model optimizations removed')
         if p.override_settings_restore_afterwards: # restore opts to original state
             for k, v in stored_opts.items():
                 setattr(opts, k, v)
@@ -614,7 +608,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
     with torch.no_grad(), ema_scope_context():
         with devices.autocast():
             p.init(p.all_prompts, p.all_seeds, p.all_subseeds)
-            if shared.opts.live_previews_enable and opts.show_progress_type == "Approximate NN" and backend == Backend.ORIGINAL:
+            if shared.opts.live_previews_enable and opts.show_progress_type == "Approx NN" and backend == Backend.ORIGINAL:
                 sd_vae_approx.model()
         if state.job_count == -1:
             state.job_count = p.n_iter
@@ -647,8 +641,11 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                     processed = Processed(p, [], p.seed, "")
                     file.write(processed.infotext(p, 0))
             step_multiplier = 1
-            sampler_config = sd_samplers.find_sampler_config(p.sampler_name)
-            step_multiplier = 2 if sampler_config and sampler_config.options.get("second_order", False) else 1
+            if not shared.opts.dont_fix_second_order_samplers_schedule:
+                try:
+                    step_multiplier = 2 if sd_samplers.all_samplers_map.get(p.sampler_name).aliases[0] in ['k_dpmpp_2s_a', 'k_dpmpp_2s_a_ka', 'k_dpmpp_sde', 'k_dpmpp_sde_ka', 'k_dpm_2', 'k_dpm_2_a', 'k_heun'] else 1
+                except:
+                    pass
             if p.n_iter > 1:
                 shared.state.job = f"Batch {n+1} out of {p.n_iter}"
 
@@ -716,7 +713,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                         p.restore_faces = False
                         info=infotext(n, i)
                         p.restore_faces = orig
-                        images.save_image(Image.fromarray(x_sample), path=p.outpath_samples, basename="", seed=seeds[i], prompt=prompts[i], extension=opts.samples_format, info=info, p=p, suffix="-before-face-restoration")
+                        images.save_image(Image.fromarray(x_sample), p.outpath_samples, "", seeds[i], prompts[i], opts.samples_format, info=info, p=p, suffix="-before-face-restoration")
                     x_sample = modules.face_restoration.restore_faces(x_sample)
                 image = Image.fromarray(x_sample)
                 if p.scripts is not None:
@@ -730,7 +727,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
                         info=infotext(n, i)
                         p.color_corrections = orig
                         image_without_cc = apply_overlay(image, p.paste_to, i, p.overlay_images)
-                        images.save_image(image_without_cc, path=p.outpath_samples, basename="", seed=seeds[i], prompt=prompts[i], extension=opts.samples_format, info=info, p=p, suffix="-before-color-correction")
+                        images.save_image(image_without_cc, p.outpath_samples, "", seeds[i], prompts[i], opts.samples_format, info=info, p=p, suffix="-before-color-correction")
                     image = apply_color_correction(p.color_corrections[i], image)
                 image = apply_overlay(image, p.paste_to, i, p.overlay_images)
                 if opts.samples_save and not p.do_not_save_samples:
@@ -776,7 +773,7 @@ def process_images_inner(p: StableDiffusionProcessing) -> Processed:
         images_list=output_images,
         seed=p.all_seeds[0],
         info=infotext(),
-        comments="\n".join(comments),
+        comments="".join(f"\n\n{comment}" for comment in comments),
         subseed=p.all_subseeds[0],
         index_of_first_image=index_of_first_image,
         infotexts=infotexts,
@@ -820,8 +817,6 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
         self.applied_old_hires_behavior_to = None
 
     def init(self, all_prompts, all_seeds, all_subseeds):
-        self.width = self.width or 512
-        self.height = self.height or 512
         if self.enable_hr:
             if opts.use_old_hires_fix_width_height and self.applied_old_hires_behavior_to != (self.width, self.height):
                 self.hr_resize_x = self.width
@@ -926,30 +921,31 @@ class StableDiffusionProcessingTxt2Img(StableDiffusionProcessing):
             decoded_samples = torch.from_numpy(np.array(batch_images))
             decoded_samples = decoded_samples.to(shared.device)
             decoded_samples = 2. * decoded_samples - 1.
-            if shared.opts.sd_vae_sliced_encode and len(decoded_samples) > 1:
-                samples = torch.stack([
-                    self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(torch.unsqueeze(decoded_sample, 0)))[0]
-                    for decoded_sample
-                    in decoded_samples
-                ])
-            else:
-                samples = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(decoded_samples))
+            samples = self.sd_model.get_first_stage_encoding(self.sd_model.encode_first_stage(decoded_samples))
             image_conditioning = self.img2img_image_conditioning(decoded_samples, samples)
         shared.state.nextjob()
         img2img_sampler_name = self.sampler_name
-        force_latent_upscaler = shared.opts.data.get('force_latent_sampler')
-        if force_latent_upscaler != 'None' and force_latent_upscaler != 'PLMS':
-            img2img_sampler_name = force_latent_upscaler
-        if img2img_sampler_name == 'PLMS':
-            img2img_sampler_name =  shared.opts.fallback_sampler if shared.opts.fallback_sampler != 'PLMS' else 'UniPC'
+        force_latent_upscaler = shared.opts.data.get('xyz_fallback_sampler')
+        if self.sampler_name in ['PLMS']:
+            img2img_sampler_name = force_latent_upscaler if force_latent_upscaler != 'None' else shared.opts.fallback_sampler # PLMS does not support img2img, use fallback instead
         self.sampler = sd_samplers.create_sampler(img2img_sampler_name, self.sd_model)
         samples = samples[:, :, self.truncate_y//2:samples.shape[2]-(self.truncate_y+1)//2, self.truncate_x//2:samples.shape[3]-(self.truncate_x+1)//2]
         noise = create_random_tensors(samples.shape[1:], seeds=seeds, subseeds=subseeds, subseed_strength=subseed_strength, p=self)
+        # GC now before running the next img2img to prevent running out of memory
         x = None
-        devices.torch_gc() # GC now before running the next img2img to prevent running out of memory
-        sd_models.apply_token_merging(self.sd_model, self.get_token_merging_ratio(for_hr=True))
+        devices.torch_gc()
+        # apply token merging optimizations from tomesd for high-res pass
+        # check if hr_only so we are not redundantly patching
+        if (cmd_opts.token_merging or opts.token_merging) and (opts.token_merging_hr_only or opts.token_merging_ratio_hr != opts.token_merging_ratio):
+            # case where user wants to use separate merge ratios
+            if not opts.token_merging_hr_only:
+                # clean patch done by first pass. (clobbering the first patch might be fine? this might be excessive)
+                tomesd.remove_patch(self.sd_model)
+                log.debug('Temporarily removed token merging optimizations in preparation for next pass')
+
+            sd_models.apply_token_merging(sd_model=self.sd_model, hr=True)
+            log.debug('Applied token merging for high-res pass')
         samples = self.sampler.sample_img2img(self, samples, noise, conditioning, unconditional_conditioning, steps=self.hr_second_pass_steps or self.steps, image_conditioning=image_conditioning)
-        sd_models.apply_token_merging(self.sd_model, self.get_token_merging_ratio())
         self.is_hr_pass = False
         return samples
 
@@ -978,7 +974,7 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         self.image_conditioning = None
 
     def init(self, all_prompts, all_seeds, all_subseeds):
-        force_latent_upscaler = shared.opts.data.get('force_latent_sampler')
+        force_latent_upscaler = shared.opts.data.get('xyz_fallback_sampler')
         if self.sampler_name in ['PLMS']:
             self.sampler_name = force_latent_upscaler if force_latent_upscaler != 'None' else shared.opts.fallback_sampler # PLMS does not support img2img, use fallback instead
         self.sampler = sd_samplers.create_sampler(self.sampler_name, self.sd_model)
@@ -1078,6 +1074,3 @@ class StableDiffusionProcessingImg2Img(StableDiffusionProcessing):
         del x
         devices.torch_gc()
         return samples
-
-    def get_token_merging_ratio(self, for_hr=False):
-        return self.token_merging_ratio or ("token_merging_ratio" in self.override_settings and opts.token_merging_ratio) or opts.token_merging_ratio_img2img or opts.token_merging_ratio

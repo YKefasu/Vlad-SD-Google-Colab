@@ -64,13 +64,6 @@ class VanillaStableDiffusionSampler:
     def before_sample(self, x, ts, cond, unconditional_conditioning):
         if state.interrupted or state.skipped:
             raise sd_samplers_common.InterruptedException
-        if state.paused:
-            shared.log.debug('Sampling paused')
-            while state.paused:
-                if state.interrupted or state.skipped:
-                    raise sd_samplers_common.InterruptedException
-                import time
-                time.sleep(0.1)
 
         if self.stop_at is not None and self.step > self.stop_at:
             raise sd_samplers_common.InterruptedException
@@ -104,10 +97,10 @@ class VanillaStableDiffusionSampler:
             unconditional_conditioning = unconditional_conditioning[:, :cond.shape[1]]
 
         if self.mask is not None:
-            encode_fn = self.sampler.model.q_sample
-            if self.is_unipc:
-                encode_fn = self.sampler.stochastic_encode
-            img_orig = encode_fn(self.init_latent, ts)
+            if shared.cmd_opts.use_ipex:
+                img_orig = self.sampler.model.q_sample(self.init_latent, ts.type(torch.int64))
+            else:
+                img_orig = self.sampler.model.q_sample(self.init_latent, ts)
             x = img_orig * self.mask + self.nmask * x
 
         # Wrap the image conditioning back up since the DDIM code can accept the dict directly.

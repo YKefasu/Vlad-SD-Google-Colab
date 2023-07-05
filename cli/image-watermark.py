@@ -26,20 +26,20 @@ def get_exif(image):
         for k, v in exif.items():
             key = list(vars(piexif.ExifIFD).keys())[list(vars(piexif.ExifIFD).values()).index(k)]
             res1[key] = piexif.helper.UserComment.load(v)
-    except Exception:
+    except:
         pass
     # using pillow
     res2 = {}
     try:
         res2 = { TAGS[k]: v for k, v in image.getexif().items() if k in TAGS }
-    except Exception:
+    except:
         pass
     return {**res1, **res2}
 
 
 def set_exif(d: dict):
     ifd = ImageFileDirectory_v2()
-    _TAGS = {v: k for k, v in TAGS.items()} # enumerate possible exif tags
+    _TAGS = dict(((v, k) for k, v in TAGS.items())) # enumerate possible exif tags
     for k, v in d.items():
         ifd[_TAGS[k]] = v
     exif_stream = io.BytesIO()
@@ -54,7 +54,7 @@ def get_watermark(image, params):
     decoded = decoder.decode(data, options.method)
     try:
         s = str(decoded, 'UTF-8').replace('\x00', '')
-    except Exception:
+    except:
         s = ''
     return s
 
@@ -111,7 +111,7 @@ def watermark(params, file):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description = 'image watermarking')
     parser.add_argument('command', choices = ['read', 'write'])
-    parser.add_argument('--wm', type=str, required=False, default='sdnext', help='watermark string')
+    parser.add_argument('--wm', type=str, required=False, default='mm', help='watermark string')
     parser.add_argument('--strip', default=False, action='store_true', help = "strip existing exif data")
     parser.add_argument('--verify', default=False, action='store_true', help = "verify watermark during write")
     parser.add_argument('--length', type=int, default=16, help="watermark length in bits")

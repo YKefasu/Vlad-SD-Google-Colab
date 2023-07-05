@@ -1,17 +1,15 @@
 # defaults
 __pycache__
-.ruff_cache
 /cache.json
-/metadata.json
 /config.json
-/ui-config.json
 /params.txt
 /styles.csv
+/ui-config.json
 /user.css
 /webui-user.bat
 /webui-user.sh
 /html/extensions.json
-/html/themes.json
+/javascript/themes.json
 node_modules
 pnpm-lock.yaml
 package-lock.json
@@ -19,7 +17,6 @@ venv
 
 # all models and temp files
 *.log
-*.log.*
 *.bak
 *.ckpt
 *.safetensors

@@ -42,7 +42,7 @@ class UpscalerRealESRGAN(Upscaler):
 
         try:
             from realesrgan import RealESRGANer
-        except Exception:
+        except:
             print("Error importing Real-ESRGAN:", file=sys.stderr)
             return img
 
@@ -73,7 +73,7 @@ class UpscalerRealESRGAN(Upscaler):
                 print(f"Unable to find model info: {path}")
                 return None
             if info.local_data_path.startswith("http"):
-                info.local_data_path = load_file_from_url(url=info.data_path, model_dir=self.model_download_path, progress=True)
+                info.local_data_path = load_file_from_url(url=info.data_path, model_dir=self.model_path, progress=True)
             return info
         except Exception as e:
             errors.display(e, 'real-esrgan model list')

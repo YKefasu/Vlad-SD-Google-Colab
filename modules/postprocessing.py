@@ -4,7 +4,7 @@ from typing import List
 
 from PIL import Image
 
-from modules import shared, images, devices, scripts, scripts_postprocessing, generation_parameters_copypaste
+from modules import shared, images, devices, scripts, scripts_postprocessing, ui_common, generation_parameters_copypaste
 from modules.shared import opts
 
 
@@ -16,7 +16,6 @@ def run_postprocessing(extras_mode, image, image_folder: List[tempfile.NamedTemp
     image_names = []
     image_ext = []
     outputs = []
-    params = {}
     if extras_mode == 1:
         for img in image_folder:
             if isinstance(img, Image.Image):
@@ -36,8 +35,7 @@ def run_postprocessing(extras_mode, image, image_folder: List[tempfile.NamedTemp
         for filename in image_list:
             try:
                 image = Image.open(filename)
-            except Exception as e:
-                shared.log.error(f'Failed to open image: {filename} {e}')
+            except Exception:
                 continue
             image_data.append(image)
             image_names.append(filename)
@@ -64,8 +62,7 @@ def run_postprocessing(extras_mode, image, image_folder: List[tempfile.NamedTemp
             basename = os.path.splitext(os.path.basename(name))[0]
         else:
             basename = ''
-        geninfo, items = images.read_info_from_image(image)
-        params = generation_parameters_copypaste.parse_generation_parameters(geninfo)
+        _geninfo, items = images.read_info_from_image(image)
         for k, v in items.items():
             pp.image.info[k] = v
         if 'parameters' in items:
@@ -78,7 +75,7 @@ def run_postprocessing(extras_mode, image, image_folder: List[tempfile.NamedTemp
             outputs.append(pp.image)
 
     devices.torch_gc()
-    return outputs, infotext, params
+    return outputs, ui_common.infotext_to_html(infotext), pp.image.info
 
 
 def run_extras(extras_mode, resize_mode, image, image_folder, input_dir, output_dir, show_extras_results, gfpgan_visibility, codeformer_visibility, codeformer_weight, upscaling_resize, upscaling_resize_w, upscaling_resize_h, upscaling_crop, extras_upscaler_1, extras_upscaler_2, extras_upscaler_2_visibility, upscale_first: bool, save_output: bool = True): #pylint: disable=unused-argument

@@ -16,7 +16,9 @@ def mod2normal(state_dict):
     # this code is copied from https://github.com/victorca25/iNNfer
     if 'conv_first.weight' in state_dict:
         crt_net = {}
-        items = list(state_dict)
+        items = []
+        for k, _v in state_dict.items():
+            items.append(k)
 
         crt_net['model.0.weight'] = state_dict['conv_first.weight']
         crt_net['model.0.bias'] = state_dict['conv_first.bias']
@@ -50,7 +52,9 @@ def resrgan2normal(state_dict, nb=23):
     if "conv_first.weight" in state_dict and "body.0.rdb1.conv1.weight" in state_dict:
         re8x = 0
         crt_net = {}
-        items = list(state_dict)
+        items = []
+        for k, _v in state_dict.items():
+            items.append(k)
 
         crt_net['model.0.weight'] = state_dict['conv_first.weight']
         crt_net['model.0.bias'] = state_dict['conv_first.bias']
@@ -154,7 +158,7 @@ class UpscalerESRGAN(Upscaler):
         if "http" in path:
             filename = load_file_from_url(
                 url=self.model_url,
-                model_dir=self.model_download_path,
+                model_dir=self.model_path,
                 file_name=f"{self.model_name}.pth",
                 progress=True,
             )

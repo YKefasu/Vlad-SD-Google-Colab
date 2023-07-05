@@ -13,48 +13,33 @@ function get_uiCurrentTabContent() {
   return gradioApp().querySelector('.tabitem[id^=tab_]:not([style*="display: none"])');
 }
 
-const uiAfterUpdateCallbacks = [];
-const uiUpdateCallbacks = [];
-const uiLoadedCallbacks = [];
-const uiTabChangeCallbacks = [];
-const optionsChangedCallbacks = [];
+uiUpdateCallbacks = [];
+uiLoadedCallbacks = [];
+uiTabChangeCallbacks = [];
+optionsChangedCallbacks = [];
 let uiCurrentTab = null;
-let uiAfterUpdateTimeout = null;
-
-function onAfterUiUpdate(callback) {
-  uiAfterUpdateCallbacks.push(callback);
-}
 
 function onUiUpdate(callback) {
   uiUpdateCallbacks.push(callback);
 }
-
 function onUiLoaded(callback) {
   uiLoadedCallbacks.push(callback);
 }
-
 function onUiTabChange(callback) {
   uiTabChangeCallbacks.push(callback);
 }
-
 function onOptionsChanged(callback) {
   optionsChangedCallbacks.push(callback);
 }
 
-function executeCallbacks(queue, arg) {
-  // if (!uiLoaded) return
-  for (const callback of queue) {
-      try {
-          callback(arg);
-      } catch (e) {
-          console.error("error running callback", callback, ":", e);
-      }
-  }
+function runCallback(x, m) {
+  try {
+    x(m);
+  } catch (e) { (console.error || console.log).call(console, e.message, e); }
 }
 
-function scheduleAfterUiUpdateCallbacks() {
-  clearTimeout(uiAfterUpdateTimeout);
-  uiAfterUpdateTimeout = setTimeout(() => executeCallbacks(uiAfterUpdateCallbacks, 500));
+function executeCallbacks(queue, m) {
+  queue.forEach((x) => { runCallback(x, m); });
 }
 
 let executedOnLoaded = false;
@@ -66,7 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
       executeCallbacks(uiLoadedCallbacks);
     }
     executeCallbacks(uiUpdateCallbacks, m);
-    scheduleAfterUiUpdateCallbacks();
     const newTab = get_uiCurrentTab();
     if (newTab && (newTab !== uiCurrentTab)) {
       uiCurrentTab = newTab;
@@ -97,16 +81,12 @@ document.addEventListener('keydown', (e) => {
  * checks that a UI element is not in another hidden element or tab content
  */
 function uiElementIsVisible(el) {
-  if (el === document) return true;
-  const computedStyle = getComputedStyle(el);
-  const isVisible = computedStyle.display !== 'none';
+  let isVisible = !el.closest('.\\!hidden');
   if (!isVisible) return false;
-  return uiElementIsVisible(el.parentNode);
-}
-
-function uiElementInSight(el) {
-  const clRect = el.getBoundingClientRect();
-  const windowHeight = window.innerHeight;
-  const isOnScreen = clRect.bottom > 0 && clRect.top < windowHeight;
-  return isOnScreen;
+  while (isVisible = el.closest('.tabitem')?.style.display !== 'none') {
+    if (!isVisible) return false;
+    if (el.parentElement) el = el.parentElement;
+    else break;
+  }
+  return isVisible;
 }

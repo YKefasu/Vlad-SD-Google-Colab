@@ -81,13 +81,6 @@ class CFGDenoiser(torch.nn.Module):
     def forward(self, x, sigma, uncond, cond, cond_scale, s_min_uncond, image_cond):
         if state.interrupted or state.skipped:
             raise sd_samplers_common.InterruptedException
-        if state.paused:
-            shared.log.debug('Sampling paused')
-            while state.paused:
-                if state.interrupted or state.skipped:
-                    raise sd_samplers_common.InterruptedException
-                import time
-                time.sleep(0.1)
 
         # at self.image_cfg_scale == 1.0 produced results for edit model are the same as with normal sampling,
         # so is_edit_model is set to False to support AND composition.
@@ -326,14 +319,7 @@ class KDiffusionSampler:
         sigma_max = sigmas.max()
 
         current_iter_seeds = p.all_seeds[p.iteration * p.batch_size:(p.iteration + 1) * p.batch_size]
-        if devices.backend == 'ipex': #Remove this after Intel adds support for torch.Generator()
-            try:
-                return BrownianTreeNoiseSampler(x.to("cpu"), sigma_min, sigma_max, seed=current_iter_seeds, transform=lambda x: x.to("cpu"), transform_last=lambda x: x.to(shared.device)) # pylint: disable=E1123
-            except Exception:
-                shared.log.error("Please apply this patch to repositories/k-diffusion/k_diffusion/sampling.py: https://github.com/crowsonkb/k-diffusion/pull/68/files")
-                return None
-        else:
-            return BrownianTreeNoiseSampler(x, sigma_min, sigma_max, seed=current_iter_seeds)
+        return BrownianTreeNoiseSampler(x, sigma_min, sigma_max, seed=current_iter_seeds)
 
     def sample_img2img(self, p, x, noise, conditioning, unconditional_conditioning, steps=None, image_conditioning=None):
         steps, t_enc = sd_samplers_common.setup_img2img_steps(p, steps)

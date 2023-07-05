@@ -93,11 +93,17 @@ def resolve_vae(checkpoint_file):
         return shared.cmd_opts.vae, 'forced'
     is_automatic = shared.opts.sd_vae in {"Automatic", "auto"}  # "auto" for people with old config
     vae_near_checkpoint = find_vae_near_checkpoint(checkpoint_file)
-    if vae_near_checkpoint is not None:
+    if vae_near_checkpoint is not None and (shared.opts.sd_vae_as_default):
         return vae_near_checkpoint, 'near checkpoint'
     if is_automatic:
-        basename = os.path.join(vae_path, os.path.splitext(os.path.basename(checkpoint_file))[0])
-        for named_vae_location in [basename + ".pt", basename + ".ckpt", basename + ".safetensors", basename + ".vae.pt", basename + ".vae.ckpt", basename + ".vae.safetensors"]:
+        for named_vae_location in [
+            os.path.join(vae_path, os.path.splitext(os.path.basename(checkpoint_file))[0] + ".pt"),
+            os.path.join(vae_path, os.path.splitext(os.path.basename(checkpoint_file))[0] + ".ckpt"),
+            os.path.join(vae_path, os.path.splitext(os.path.basename(checkpoint_file))[0] + ".safetensors"),
+            os.path.join(vae_path, os.path.splitext(os.path.basename(checkpoint_file))[0] + ".vae.pt"),
+            os.path.join(vae_path, os.path.splitext(os.path.basename(checkpoint_file))[0] + ".vae.ckpt"),
+            os.path.join(vae_path, os.path.splitext(os.path.basename(checkpoint_file))[0] + ".vae.safetensors"),
+        ]:
             if os.path.isfile(named_vae_location):
                 return named_vae_location, 'in VAE dir'
     if shared.opts.sd_vae == "None":

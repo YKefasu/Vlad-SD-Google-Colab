@@ -20,8 +20,8 @@ all_images = []
 all_images_by_type = {}
 
 
-class Result():
-    def __init__(self, typ: str, fn: str, tag: str = None, requested: list = []): # noqa: B006
+class Result(object):
+    def __init__(self, typ: str, fn: str, tag: str = None, requested: list = []):
         self.type = typ
         self.input = fn
         self.output = ''
@@ -139,7 +139,7 @@ def upscale_restore_image(res: Result, upscale: bool = False, restore: bool = Fa
         res.ops.append('upscale')
     if restore:
         kwargs.codeformer_visibility = 1.0
-        kwargs.codeformer_weight = 0.2
+        kwargs.codeformer_weight: 0.2
         res.ops.append('restore')
     if upscale or restore:
         result = sdapi.postsync('/sdapi/v1/extra-single-image', kwargs)
@@ -158,7 +158,7 @@ def interrogate_image(res: Result, tag: str = None):
         result = sdapi.postsync('/sdapi/v1/interrogate', json)
         if model == 'clip':
             caption = result.caption if 'caption' in result else ''
-            caption = caption.split(',')[0].replace(' a ', ' ').strip()
+            caption = caption.split(',')[0].replace('a ', '')
             if tag is not None:
                 caption = res.tag + ', ' + caption
         if model == 'deepdanbooru':
@@ -170,7 +170,6 @@ def interrogate_image(res: Result, tag: str = None):
                     tags.insert(0, t.strip())
     pos = 0 if len(tags) == 0 else 1
     tags.insert(pos, caption.split(' ')[1])
-    tags = [t for t in tags if len(t) > 2]
     if len(tags) > options.process.tag_limit:
         tags = tags[:options.process.tag_limit]
     res.caption = caption
@@ -261,7 +260,7 @@ def save_image(res: Result, folder: str):
     return res
 
 
-def file(filename: str, folder: str, tag = None, requested = []): # noqa: B006
+def file(filename: str, folder: str, tag = None, requested = []):
     # initialize result dict
     res = Result(fn = filename, typ='unknown', tag=tag, requested = requested)
     # open image

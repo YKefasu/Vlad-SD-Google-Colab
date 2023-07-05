@@ -91,7 +91,7 @@ def setup_model(dirname):
                 self.face_helper.get_face_landmarks_5(only_center_face=False, resize=640, eye_dist_threshold=5)
                 self.face_helper.align_warp_face()
 
-                for cropped_face in self.face_helper.cropped_faces:
+                for _idx, cropped_face in enumerate(self.face_helper.cropped_faces):
                     cropped_face_t = img2tensor(cropped_face / 255., bgr2rgb=True, float32=True)
                     normalize(cropped_face_t, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True)
                     cropped_face_t = cropped_face_t.unsqueeze(0).to(devices.device_codeformer)
@@ -101,7 +101,7 @@ def setup_model(dirname):
                             output = self.net(cropped_face_t, w=w if w is not None else shared.opts.code_former_weight, adain=True)[0]
                             restored_face = tensor2img(output, rgb2bgr=True, min_max=(-1, 1))
                         del output
-                        if devices.backend == 'ipex':
+                        if cmd_opts.use_ipex:
                             torch.xpu.empty_cache()
                         else:
                             torch.cuda.empty_cache()

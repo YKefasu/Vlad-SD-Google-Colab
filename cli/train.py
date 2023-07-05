@@ -6,6 +6,7 @@ import re
 import gc
 import sys
 import json
+import time
 import shutil
 import pathlib
 import asyncio
@@ -38,7 +39,13 @@ log_file = os.path.join(os.path.dirname(__file__), 'train.log')
 
 # methods
 
-def setup_logging():
+def setup_logging(clean=False):
+    try:
+        if clean and os.path.isfile(log_file):
+            os.remove(log_file)
+        time.sleep(0.1) # prevent race condition
+    except:
+        pass
     from rich.theme import Theme
     from rich.logging import RichHandler
     from rich.console import Console
@@ -80,12 +87,6 @@ def parse_args():
     global args # pylint: disable=global-statement
     parser = argparse.ArgumentParser(description = 'SD.Next Train')
 
-
-    group_server = parser.add_argument_group('Server')
-    group_server.add_argument('--server', type=str, default='http://127.0.0.1:7860', required=False, help='server url, default: %(default)s')
-    group_server.add_argument('--user', type=str, default=None, required=False, help='server url, default: %(default)s')
-    group_server.add_argument('--password', type=str, default=None, required=False, help='server url, default: %(default)s')
-
     group_main = parser.add_argument_group('Main')
     group_main.add_argument('--type', type=str, choices=['embedding', 'ti', 'lora', 'lyco', 'dreambooth', 'hypernetwork'], default=None, required=True, help='training type')
     group_main.add_argument('--model', type=str, default='', required=False, help='base model to use for training, default: current loaded model')
@@ -94,7 +95,7 @@ def parse_args():
 
     group_data = parser.add_argument_group('Dataset')
     group_data.add_argument('--input', type=str, default=None, required=True, help='input folder with training images')
-    group_data.add_argument('--interim', type=str, default='', required=False, help='where to store processed images, default is system temp/train')
+    group_data.add_argument('--output', type=str, default='', required=False, help='where to store processed images, default is system temp/train')
     group_data.add_argument('--process', type=str, default='original,interrogate,resize,square', required=False, help=f'list of possible processing steps: {valid_steps}, default: %(default)s')
 
     group_train = parser.add_argument_group('Train')
@@ -112,7 +113,6 @@ def parse_args():
 
     group_other = parser.add_argument_group('Other')
     group_other.add_argument('--overwrite', default = False, action='store_true', help = "overwrite existing training, default: %(default)s")
-    group_other.add_argument('--experimental', default = False, action='store_true', help = "enable experimental options, default: %(default)s")
     group_other.add_argument('--debug', default = False, action='store_true', help = "enable debug level logging, default: %(default)s")
 
     args = parser.parse_args()
@@ -120,9 +120,9 @@ def parse_args():
 
 def prepare_server():
     try:
-        server_status = util.Map(sdapi.progresssync())
+        server_status = util.Map(sdapi.progress())
         server_state = server_status['state']
-    except Exception:
+    except:
         log.error(f'server error: {server_status}')
         exit(1)
     if server_state['job_count'] > 0:
@@ -164,9 +164,9 @@ def verify_args():
     if not os.path.isfile(args.model):
         log.error(f'cannot find loaded model: {args.model}')
         exit(1)
-    # if not os.path.exists(args.ckpt_dir) or not os.path.isdir(args.ckpt_dir):
-    #     log.error(f'cannot find models folder: {args.ckpt_dir}')
-    #     exit(1)
+    if not os.path.exists(args.ckpt_dir) or not os.path.isdir(args.ckpt_dir):
+        log.error(f'cannot find models folder: {args.ckpt_dir}')
+        exit(1)
     if not os.path.exists(args.input) or not os.path.isdir(args.input):
         log.error(f'cannot find training folder: {args.input}')
         exit(1)
@@ -176,8 +176,8 @@ def verify_args():
     if not os.path.exists(args.lyco_dir) or not os.path.isdir(args.lyco_dir):
         log.error(f'cannot find lyco folder: {args.lyco_dir}')
         exit(1)
-    if args.interim != '':
-        args.process_dir = args.interim
+    if args.output != '':
+        args.process_dir = args.output
     else:
         args.process_dir = os.path.join(tempfile.gettempdir(), 'train', args.name)
     log.debug(f'args: {vars(args)}')
@@ -373,32 +373,10 @@ def process_inputs():
     process.unload()
 
 
-def check_versions():
-    if args.experimental:
-        log.info('experimental mode enabled')
-        return
-    log.info('checking accelerate')
-    import accelerate
-    if accelerate.__version__ != '0.19.0':
-        log.error(f'invalid accelerate version: required=0.19.0 found={accelerate.__version__}')
-        exit(1)
-    log.info('checking diffusers')
-    import diffusers
-    if diffusers.__version__ != '0.10.2':
-        log.error(f'invalid diffusers version: required=0.10.2 found={diffusers.__version__}')
-        exit(1)
-
-
 if __name__ == '__main__':
     log.info('SD.Next train script')
     parse_args()
     setup_logging()
-    check_versions()
-    sdapi.sd_url = args.server
-    if args.user is not None:
-        sdapi.sd_username = args.user
-    if args.password is not None:
-        sdapi.sd_password = args.password
     prepare_server()
     verify_args()
     prepare_options()
@@ -410,7 +388,7 @@ if __name__ == '__main__':
             train_embedding()
         if args.type == 'lora' or args.type == 'lyco' or args.type == 'dreambooth':
             train_lora()
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as e:
         log.error('interrupt requested')
         sdapi.interrupt()
     mem_stats()

@@ -37,7 +37,7 @@ async def txt2img():
     data = {}
     try:
         data = await sdapi.post('/sdapi/v1/txt2img', options)
-    except Exception:
+    except:
         return -1
     if 'error' in data:
         return -1

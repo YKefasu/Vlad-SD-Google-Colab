@@ -19,12 +19,12 @@ from torch.utils.checkpoint import checkpoint
 
 
 def narrow_trunc(
-    tensor: Tensor,
+    input: Tensor, # pylint: disable=redefined-builtin
     dim: int,
     start: int,
     length: int
 ) -> Tensor:
-    return torch.narrow(tensor, dim, start, length if tensor.shape[dim] >= start + length else tensor.shape[dim] - start)
+    return torch.narrow(input, dim, start, length if input.shape[dim] >= start + length else input.shape[dim] - start)
 
 
 class AttnChunk(NamedTuple):
@@ -80,7 +80,7 @@ def _query_chunk_attention(
     kv_chunk_size: int,
 ) -> Tensor:
     _batch_x_heads, k_tokens, _k_channels_per_head = key.shape
-    # _, _, v_channels_per_head = value.shape
+    _, _, _v_channels_per_head = value.shape
 
     def chunk_scanner(chunk_idx: int) -> AttnChunk:
         key_chunk = narrow_trunc(
@@ -201,6 +201,8 @@ def efficient_dot_product_attention(
             value=value,
         )
 
+    # maybe we should use torch.empty_like(query) to allocate storage in-advance,
+    # and pass slices to be mutated, instead of torch.cat()ing the returned slices
     res = torch.cat([
         compute_query_chunk_attn(
             query=get_query_chunk(i * query_chunk_size),

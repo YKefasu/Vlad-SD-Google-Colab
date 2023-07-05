@@ -16,7 +16,6 @@ extensions_list = []
 sort_ordering = {
     "default": (True, lambda x: x.get('sort_default', '')),
     "user extensions": (True, lambda x: x.get('sort_user', '')),
-    "trending": (True, lambda x: x.get('sort_trending', -1)),
     "update avilable": (True, lambda x: x.get('sort_update', '')),
     "updated date": (True, lambda x: x.get('updated', '2000-01-01T00:00')),
     "created date": (True, lambda x: x.get('created', '2000-01-01T00:00')),
@@ -35,7 +34,7 @@ def update_extension_list():
         with open(os.path.join(paths.script_path, "html", "extensions.json"), "r", encoding="utf-8") as f:
             extensions_list = json.loads(f.read())
             shared.log.debug(f'Extensions list loaded: {os.path.join(paths.script_path, "html", "extensions.json")}')
-    except Exception:
+    except:
         shared.log.debug(f'Extensions list failed to load: {os.path.join(paths.script_path, "html", "extensions.json")}')
     found = []
     for ext in extensions.extensions:
@@ -113,7 +112,7 @@ def check_updates(_id_task, disable_list, search_text, sort_column):
         except FileNotFoundError as e:
             if 'FETCH_HEAD' not in str(e):
                 raise
-        except Exception as e:
+        except Exception:
             errors.display(e, f'extensions check update: {ext.name}')
         shared.state.nextjob()
     return refresh_extensions_list_from_data(search_text, sort_column), "Extension update complete | Restart required"
@@ -123,9 +122,7 @@ def make_commit_link(commit_hash, remote, text=None):
     if text is None:
         text = commit_hash[:8]
     if remote.startswith("https://github.com/"):
-        if remote.endswith(".git"):
-            remote = remote[:-4]
-        href = remote + "/commit/" + commit_hash
+        href = os.path.join(remote, "commit", commit_hash)
         return f'<a href="{href}" target="_blank">{text}</a>'
     else:
         return text
@@ -155,12 +152,12 @@ def install_extension_from_url(dirname, url, branch_name, search_text, sort_colu
         shutil.rmtree(tmpdir, True)
         if not branch_name:
             # if no branch is specified, use the default branch
-            with git.Repo.clone_from(url, tmpdir, filter=['blob:none']) as repo:
+            with git.Repo.clone_from(url, tmpdir) as repo:
                 repo.remote().fetch()
                 for submodule in repo.submodules:
                     submodule.update()
         else:
-            with git.Repo.clone_from(url, tmpdir, filter=['blob:none'], branch=branch_name) as repo:
+            with git.Repo.clone_from(url, tmpdir, branch=branch_name) as repo:
                 repo.remote().fetch()
                 for submodule in repo.submodules:
                     submodule.update()
@@ -264,7 +261,7 @@ def search_extensions(search_text, sort_column):
 
 
 def refresh_extensions_list_from_data(search_text, sort_column):
-    # shared.log.debug(f'Extensions manager: refresh list search="{search_text}" sort="{sort_column}"')
+    shared.log.debug(f'Extensions manager: refresh list search="{search_text}" sort="{sort_column}"')
     code = """
         <table id="extensions">
             <colgroup>
@@ -287,10 +284,7 @@ def refresh_extensions_list_from_data(search_text, sort_column):
         </thead>
         <tbody>"""
     for ext in extensions_list:
-        extension = [e for e in extensions.extensions
-                     if (e.name == ext['name'])
-                       or (e.git_name == ext['name'])
-                       or (e.remote == ext['url'])]
+        extension = [extension for extension in extensions.extensions if extension.git_name == ext['name'] or extension.name == ext['name']]
         if len(extension) > 0:
             extension[0].read_info_from_repo()
         ext['installed'] = len(extension) > 0
@@ -331,11 +325,7 @@ def refresh_extensions_list_from_data(search_text, sort_column):
         ext['sort_user'] = f"{'0' if ext['is_builtin'] else '1'}{'1' if ext['installed'] else '0'}{ext.get('name', '')}"
         ext['sort_enabled'] = f"{'0' if ext['enabled'] else '1'}{'1' if ext['is_builtin'] else '0'}{'1' if ext['installed'] else '0'}{ext.get('updated', '2000-01-01T00:00')}"
         ext['sort_update'] = f"{'1' if update_available else '0'}{'1' if ext['installed'] else '0'}{ext.get('updated', '2000-01-01T00:00')}"
-        timedelta = datetime.now() - datetime.fromisoformat(ext.get('created', '2000-01-01T00:00Z')[:-1])
-        ext['sort_trending'] = round(stars / max(timedelta.days, 5), 1)
         tags = ext.get("tags", [])
-        if not isinstance(tags, list):
-            tags = tags.split(' ')
         tags_string = ' '.join(tags)
         tags = tags + ["installed"] if installed else tags
         if len([x for x in tags if x in hide_tags]) > 0:
@@ -365,7 +355,7 @@ def refresh_extensions_list_from_data(search_text, sort_column):
                 <td><a href="{html.escape(url)}" target="_blank" class="name">{html.escape(name)}</a><br>{tags_text}</td>
                 <td>{html.escape(description)}
                     <p class="info"><span class="date">Created {html.escape(created)} | Added {html.escape(added)} | Pushed {html.escape(pushed)} | Updated {html.escape(updated)}</span></p>
-                    <p class="info"><span class="date">Stars {html.escape(str(stars))} | Size {html.escape(str(size))} | Commits {html.escape(str(commits))} | Issues {html.escape(str(issues))} | Trending {html.escape(str(ext['sort_trending']))}</span></p>
+                    <p class="info"><span class="date">Stars {html.escape(str(stars))} | Size {html.escape(str(size))} | Commits {html.escape(str(commits))} | Issues {html.escape(str(issues))}</span></p>
                 </td>
                 <td>{type_code}</td>
                 <td>{version_code}</td>
@@ -382,7 +372,7 @@ def create_ui():
         extensions_disabled_list = gr.Text(elem_id="extensions_disabled_list", visible=False).style(container=False)
         extensions_update_list = gr.Text(elem_id="extensions_update_list", visible=False).style(container=False)
         with gr.Tabs(elem_id="tabs_extensions"):
-            with gr.TabItem("Manage extensions", id="manage"):
+            with gr.TabItem("Manage Extensions", id="manage"):
                 with gr.Row(elem_id="extensions_installed_top"):
                     extension_to_install = gr.Text(elem_id="extension_to_install", visible=False)
                     install_extension_button = gr.Button(elem_id="install_extension_button", visible=False)
@@ -442,7 +432,7 @@ def create_ui():
                     outputs=[extensions_table, info],
                 )
             with gr.TabItem("Manual install", id="install_from_url"):
-                install_url = gr.Text(label="Extension GIT repository URL")
+                install_url = gr.Text(label="URL for extension's git repository")
                 install_branch = gr.Text(label="Specific branch name", placeholder="Leave empty for default main branch")
                 install_dirname = gr.Text(label="Local directory name", placeholder="Leave empty for auto")
                 install_button = gr.Button(value="Install", variant="primary")

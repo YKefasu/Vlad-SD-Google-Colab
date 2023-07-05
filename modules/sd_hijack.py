@@ -33,7 +33,7 @@ def apply_optimizations():
     ldm.modules.diffusionmodules.model.nonlinearity = silu
     ldm.modules.diffusionmodules.openaimodel.th = sd_hijack_unet.th
     optimization_method = None
-    can_use_sdp = hasattr(torch.nn.functional, "scaled_dot_product_attention") and callable(torch.nn.functional.scaled_dot_product_attention)
+    can_use_sdp = hasattr(torch.nn.functional, "scaled_dot_product_attention") and callable(getattr(torch.nn.functional, "scaled_dot_product_attention"))
     if devices.device == torch.device("cpu"):
         if opts.cross_attention_optimization == "Scaled-Dot-Product":
             shared.log.warning("Scaled dot product cross attention is not available on CPU")
@@ -173,13 +173,7 @@ class StableDiffusionModelHijack:
         if m.cond_stage_key == "edit":
             sd_hijack_unet.hijack_ddpm_edit()
 
-        if opts.cuda_compile and opts.cuda_compile_mode == 'ipex':
-            import logging
-            if devices.backend == 'ipex':
-                shared.log.info("Model compile enabled: IPEX Optimize Graph Mode")
-            else:
-                shared.log.warning("Model compile skipped: IPEX Method is for Intel GPU's with OneAPI")
-        elif opts.cuda_compile and opts.cuda_compile_mode != 'none':
+        if opts.cuda_compile and opts.cuda_compile_mode != 'none':
             try:
                 import logging
                 import torch._dynamo as dynamo # pylint: disable=unused-import

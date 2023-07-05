@@ -1,3 +1,4 @@
+/* global gradioApp, opts */
 function onCalcResolutionHires(enable_hr, width, height, hr_scale, hr_resize_x, hr_resize_y) {
   function setInactive(elem, inactive) {
     elem.classList.toggle('inactive', !!inactive);

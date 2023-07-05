@@ -9,8 +9,12 @@ import subprocess
 import io
 import pstats
 import cProfile
-import pkg_resources
 
+try:
+    from modules.cmd_args import parser
+except:
+    import argparse
+    parser = argparse.ArgumentParser(description="SD.Next", conflict_handler='resolve', formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=55, indent_increment=2, width=200))
 
 class Dot(dict): # dot notation access to dictionary attributes
     __getattr__ = dict.get
@@ -19,7 +23,7 @@ class Dot(dict): # dot notation access to dictionary attributes
 
 
 log = logging.getLogger("sd")
-log_file = os.path.join(os.path.dirname(__file__), 'sdnext.log')
+log_file = os.path.join(os.path.dirname(__file__), 'webui.log')
 quick_allowed = True
 errors = 0
 opts = {}
@@ -27,6 +31,7 @@ args = Dot({
     'debug': False,
     'reset': False,
     'upgrade': False,
+    'skip_update': False,
     'skip_extensions': False,
     'skip_requirements': False,
     'skip_git': False,
@@ -44,73 +49,42 @@ args = Dot({
 })
 git_commit = "unknown"
 
-
 # setup console and file logging
-def setup_logging():
-
-    class RingBuffer(logging.StreamHandler):
-        def __init__(self, capacity):
-            super().__init__()
-            self.capacity = capacity
-            self.buffer = []
-            self.formatter = logging.Formatter('{ "asctime":"%(asctime)s", "created":%(created)f, "facility":"%(name)s", "pid":%(process)d, "tid":%(thread)d, "level":"%(levelname)s", "module":"%(module)s", "func":"%(funcName)s", "msg":"%(message)s" }')
-
-        def emit(self, record):
-            msg = self.format(record)
-            # self.buffer.append(json.loads(msg))
-            self.buffer.append(msg)
-            if len(self.buffer) > self.capacity:
-                self.buffer.pop(0)
-
-        def get(self):
-            return self.buffer
-
-    from logging.handlers import RotatingFileHandler
+def setup_logging(clean=False):
+    try:
+        if clean and os.path.isfile(log_file):
+            os.remove(log_file)
+        time.sleep(0.1) # prevent race condition
+    except:
+        pass
     from rich.theme import Theme
     from rich.logging import RichHandler
     from rich.console import Console
     from rich.pretty import install as pretty_install
     from rich.traceback import install as traceback_install
-
-    level = logging.DEBUG if args.debug else logging.INFO
-    log.setLevel(logging.DEBUG) # log to file is always at level debug for facility `sd`
     console = Console(log_time=True, log_time_format='%H:%M:%S-%f', theme=Theme({
         "traceback.border": "black",
         "traceback.border.syntax_error": "black",
         "inspect.value.border": "black",
     }))
-    logging.basicConfig(level=logging.ERROR, format='%(asctime)s | %(name)s | %(levelname)s | %(module)s | %(message)s', handlers=[logging.NullHandler()]) # redirect default logger to null
+    # logging.getLogger("urllib3").setLevel(logging.ERROR)
+    # logging.getLogger("httpx").setLevel(logging.ERROR)
+    level = logging.DEBUG if args.debug else logging.INFO
+    logging.basicConfig(level=logging.ERROR, format='%(asctime)s | %(name)s | %(levelname)s | %(module)s | %(message)s', filename=log_file, filemode='a', encoding='utf-8', force=True)
+    log.setLevel(logging.DEBUG) # log to file is always at level debug for facility `sd`
     pretty_install(console=console)
     traceback_install(console=console, extra_lines=1, width=console.width, word_wrap=False, indent_guides=False, suppress=[])
+    rh = RichHandler(show_time=True, omit_repeated_times=False, show_level=True, show_path=False, markup=False, rich_tracebacks=True, log_time_format='%H:%M:%S-%f', level=level, console=console)
+    rh.set_name(level)
     while log.hasHandlers() and len(log.handlers) > 0:
         log.removeHandler(log.handlers[0])
-
-    # handlers
-    rh = RichHandler(show_time=True, omit_repeated_times=False, show_level=True, show_path=False, markup=False, rich_tracebacks=True, log_time_format='%H:%M:%S-%f', level=level, console=console)
-    rh.setLevel(level)
     log.addHandler(rh)
-
-    fh = RotatingFileHandler(log_file, maxBytes=10*1024*1024, backupCount=5, encoding='utf-8', delay=True) # 10MB default for log rotation
-    fh.formatter = logging.Formatter('%(asctime)s | %(name)s | %(levelname)s | %(module)s | %(message)s')
-    fh.setLevel(logging.DEBUG)
-    log.addHandler(fh)
-
-    rb = RingBuffer(100) # 100 entries default in log ring buffer
-    rb.setLevel(level)
-    log.addHandler(rb)
-    log.buffer = rb.buffer
-
-    # overrides
-    logging.getLogger("urllib3").setLevel(logging.ERROR)
-    logging.getLogger("httpx").setLevel(logging.ERROR)
-    logging.getLogger("ControlNet").handlers = log.handlers
-    logging.getLogger("lycoris").handlers = log.handlers
 
 
 def print_profile(profile: cProfile.Profile, msg: str):
     try:
         from rich import print # pylint: disable=redefined-builtin
-    except Exception:
+    except:
         pass
     profile.disable()
     stream = io.StringIO()
@@ -118,12 +92,13 @@ def print_profile(profile: cProfile.Profile, msg: str):
     ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(15)
     profile = None
     lines = stream.getvalue().split('\n')
-    lines = [line for line in lines if '<frozen' not in line and '{built-in' not in line and '/logging' not in line and '/rich' not in line]
+    lines = [l for l in lines if '<frozen' not in l and '{built-in' not in l and '/logging' not in l and '/rich' not in l]
     print(f'Profile {msg}:', '\n'.join(lines))
 
 
 # check if package is installed
 def installed(package, friendly: str = None):
+    import pkg_resources
     ok = True
     try:
         if friendly:
@@ -144,7 +119,7 @@ def installed(package, friendly: str = None):
             ok = ok and spec is not None
             if ok:
                 version = pkg_resources.get_distribution(p[0]).version
-                # log.debug(f"Package version found: {p[0]} {version}")
+                log.debug(f"Package version found: {p[0]} {version}")
                 if len(p) > 1:
                     ok = ok and version == p[1]
                     if not ok:
@@ -157,24 +132,6 @@ def installed(package, friendly: str = None):
         return False
 
 
-def pip(arg: str, ignore: bool = False, quiet: bool = False):
-    arg = arg.replace('>=', '==')
-    if not quiet:
-        log.info(f'Installing package: {arg.replace("install", "").replace("--upgrade", "").replace("--no-deps", "").replace("--force", "").replace("  ", " ").strip()}')
-    log.debug(f"Running pip: {arg}")
-    result = subprocess.run(f'"{sys.executable}" -m pip {arg}', shell=True, check=False, env=os.environ, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    txt = result.stdout.decode(encoding="utf8", errors="ignore")
-    if len(result.stderr) > 0:
-        txt += ('\n' if len(txt) > 0 else '') + result.stderr.decode(encoding="utf8", errors="ignore")
-    txt = txt.strip()
-    if result.returncode != 0 and not ignore:
-        global errors # pylint: disable=global-statement
-        errors += 1
-        log.error(f'Error running pip: {arg}')
-        log.debug(f'Pip output: {txt}')
-    return txt
-
-
 # install package using pip if not already installed
 def install(package, friendly: str = None, ignore: bool = False):
     if args.reinstall:
@@ -182,8 +139,25 @@ def install(package, friendly: str = None, ignore: bool = False):
         quick_allowed = False
     if args.use_ipex and package == "pytorch_lightning==1.9.4":
         package = "pytorch_lightning==1.8.6"
+
+    def pip(arg: str):
+        arg = arg.replace('>=', '==')
+        log.info(f'Installing package: {arg.replace("install", "").replace("--upgrade", "").replace("--no-deps", "").replace("--force", "").replace("  ", " ").strip()}')
+        log.debug(f"Running pip: {arg}")
+        result = subprocess.run(f'"{sys.executable}" -m pip {arg}', shell=True, check=False, env=os.environ, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        txt = result.stdout.decode(encoding="utf8", errors="ignore")
+        if len(result.stderr) > 0:
+            txt += ('\n' if len(txt) > 0 else '') + result.stderr.decode(encoding="utf8", errors="ignore")
+        txt = txt.strip()
+        if result.returncode != 0 and not ignore:
+            global errors # pylint: disable=global-statement
+            errors += 1
+            log.error(f'Error running pip: {arg}')
+            log.debug(f'Pip output: {txt}')
+        return txt
+
     if args.reinstall or not installed(package, friendly):
-        pip(f"install --upgrade {package}", ignore=ignore)
+        pip(f"install --upgrade {package}")
 
 
 # execute git command
@@ -191,8 +165,6 @@ def git(arg: str, folder: str = None, ignore: bool = False):
     if args.skip_git:
         return ''
     git_cmd = os.environ.get('GIT', "git")
-    if git_cmd != "git":
-        git_cmd = os.path.abspath(git_cmd)
     result = subprocess.run(f'"{git_cmd}" {arg}', check=False, shell=True, env=os.environ, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=folder or '.')
     txt = result.stdout.decode(encoding="utf8", errors="ignore")
     if len(result.stderr) > 0:
@@ -232,13 +204,12 @@ def update(folder):
 def clone(url, folder, commithash=None):
     if os.path.exists(folder):
         if commithash is None:
-            update(folder)
-        else:
-            current_hash = git('rev-parse HEAD', folder).strip()
-            if current_hash != commithash:
-                git('fetch', folder)
-                git(f'checkout {commithash}', folder)
-                return
+            return
+        current_hash = git('rev-parse HEAD', folder).strip()
+        if current_hash != commithash:
+            git('fetch', folder)
+            git(f'checkout {commithash}', folder)
+            return
     else:
         log.info(f'Cloning repository: {url}')
         git(f'clone "{url}" "{folder}"')
@@ -249,21 +220,18 @@ def clone(url, folder, commithash=None):
 # check python version
 def check_python():
     supported_minors = [9, 10]
-    if args.quick:
-        return
     if args.experimental:
         supported_minors.append(11)
     log.info(f'Python {platform.python_version()} on {platform.system()}')
     if not (int(sys.version_info.major) == 3 and int(sys.version_info.minor) in supported_minors):
         log.error(f"Incompatible Python version: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro} required 3.{supported_minors}")
         if not args.ignore:
-            sys.exit(1)
-    if not args.skip_git:
-        git_cmd = os.environ.get('GIT', "git")
-        if shutil.which(git_cmd) is None:
-            log.error('Git not found')
-            if not args.ignore:
-                sys.exit(1)
+            exit(1)
+    git_cmd = os.environ.get('GIT', "git")
+    if shutil.which(git_cmd) is None:
+        log.error('Git not found')
+        if not args.ignore:
+            exit(1)
     else:
         git_version = git('--version', folder=None, ignore=False)
         log.debug(f'Git {git_version.replace("git version", "").strip()}')
@@ -271,8 +239,6 @@ def check_python():
 
 # check torch version
 def check_torch():
-    if args.quick:
-        return
     if args.profile:
         pr = cProfile.Profile()
         pr.enable()
@@ -288,18 +254,15 @@ def check_torch():
     elif allow_cuda and (shutil.which('nvidia-smi') is not None or os.path.exists(os.path.join(os.environ.get('SystemRoot') or r'C:\Windows', 'System32', 'nvidia-smi.exe'))):
         log.info('nVidia CUDA toolkit detected')
         torch_command = os.environ.get('TORCH_COMMAND', 'torch torchvision --index-url https://download.pytorch.org/whl/cu118')
-        xformers_package = os.environ.get('XFORMERS_PACKAGE', 'xformers==0.0.20' if opts.get('cross_attention_optimization', '') == 'xFormers' else 'none')
+        xformers_package = os.environ.get('XFORMERS_PACKAGE', 'xformers==0.0.17' if opts.get('cross_attention_optimization', '') == 'xFormers' else 'none')
     elif allow_rocm and (shutil.which('rocminfo') is not None or os.path.exists('/opt/rocm/bin/rocminfo') or os.path.exists('/dev/kfd')):
         log.info('AMD ROCm toolkit detected')
         os.environ.setdefault('HSA_OVERRIDE_GFX_VERSION', '10.3.0')
         os.environ.setdefault('PYTORCH_HIP_ALLOC_CONF', 'garbage_collection_threshold:0.8,max_split_size_mb:512')
-        torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.1 torchvision==0.15.2 --index-url https://download.pytorch.org/whl/rocm5.4.2')
+        torch_command = os.environ.get('TORCH_COMMAND', 'torch==2.0.0 torchvision==0.15.1 --index-url https://download.pytorch.org/whl/rocm5.4.2')
         xformers_package = os.environ.get('XFORMERS_PACKAGE', 'none')
-    elif allow_ipex and (args.use_ipex or shutil.which('sycl-ls') is not None or os.environ.get('ONEAPI_ROOT') is not None or os.path.exists('/opt/intel/oneapi')):
-        args.use_ipex = True
+    elif allow_ipex and args.use_ipex and shutil.which('sycl-ls') is not None:
         log.info('Intel OneAPI Toolkit detected')
-        if shutil.which('sycl-ls') is None:
-            log.error('Intel OneAPI Toolkit is not activated! Start the WebUI with --use-ipex or activate OneAPI manually')
         torch_command = os.environ.get('TORCH_COMMAND', 'torch==1.13.0a0 torchvision==0.14.1a0 intel_extension_for_pytorch==1.13.120+xpu -f https://developer.intel.com/ipex-whl-stable-xpu')
         xformers_package = os.environ.get('XFORMERS_PACKAGE', 'none')
     else:
@@ -328,8 +291,7 @@ def check_torch():
                 import intel_extension_for_pytorch as ipex # pylint: disable=import-error, unused-import
                 log.info(f'Torch backend: Intel IPEX {ipex.__version__}')
                 log.info(f'{os.popen("icpx --version").read().rstrip()}')
-                for device in range(torch.xpu.device_count()):
-                    log.info(f'Torch detected GPU: {torch.xpu.get_device_name(device)} VRAM {round(torch.xpu.get_device_properties(device).total_memory / 1024 / 1024)} Compute Units {torch.xpu.get_device_properties(device).max_compute_units}')
+                log.info(f'Torch detected GPU: {torch.xpu.get_device_name("xpu")} VRAM {round(torch.xpu.get_device_properties("xpu").total_memory / 1024 / 1024)}')
             elif torch.cuda.is_available() and (allow_cuda or allow_rocm):
                 # log.debug(f'Torch allocator: {torch.cuda.get_allocator_backend()}')
                 if torch.version.cuda and allow_cuda:
@@ -344,26 +306,22 @@ def check_torch():
                 try:
                     if args.use_directml and allow_directml:
                         import torch_directml # pylint: disable=import-error
+                        import pkg_resources
                         version = pkg_resources.get_distribution("torch-directml")
                         log.info(f'Torch backend: DirectML ({version})')
                         for i in range(0, torch_directml.device_count()):
                             log.info(f'Torch detected GPU: {torch_directml.device_name(i)}')
-                except Exception:
+                except:
                     log.warning("Torch reports CUDA not available")
         except Exception as e:
             log.error(f'Could not load torch: {e}')
             if not args.ignore:
-                sys.exit(1)
+                exit(1)
     if args.version:
         return
     try:
         if 'xformers' in xformers_package:
             install(f'--no-deps {xformers_package}', ignore=True)
-        else:
-            x = pkg_resources.working_set.by_key.get('xformers', None)
-            if x is not None:
-                log.warning(f'Not used, uninstalling: {x}')
-                pip('uninstall xformers --yes --quiet', ignore=True, quiet=True)
     except Exception as e:
         log.debug(f'Cannot install xformers package: {e}')
     try:
@@ -377,35 +335,19 @@ def check_torch():
         print_profile(pr, 'Torch')
 
 
-# check modified files
-def check_modified_files():
-    if args.quick:
-        return
-    if args.skip_git:
-        return
-    try:
-        res = git('status --porcelain')
-        files = [x[2:].strip() for x in res.split('\n')]
-        files = [x for x in files if len(x) > 0 and (not x.startswith('extensions')) and (not x.startswith('wiki')) and (not x.endswith('.json')) and ('.log' not in x)]
-        if len(files) > 0:
-            log.warning(f'Modified files: {files}')
-    except Exception:
-        pass
-
-
 # install required packages
 def install_packages():
     if args.profile:
         pr = cProfile.Profile()
         pr.enable()
-    log.info('Verifying packages')
+    log.info('Installing packages')
     # gfpgan_package = os.environ.get('GFPGAN_PACKAGE', "git+https://github.com/TencentARC/GFPGAN.git@8d2447a2d918f8eba5a4a01463fd48e45126a379")
     # openclip_package = os.environ.get('OPENCLIP_PACKAGE', "git+https://github.com/mlfoundations/open_clip.git@bb6e834e9c70d9c27d0dc3ecedeebeaeb1ffad6b")
     # install(gfpgan_package, 'gfpgan')
     # install(openclip_package, 'open-clip-torch')
     clip_package = os.environ.get('CLIP_PACKAGE', "git+https://github.com/openai/CLIP.git")
     install(clip_package, 'clip')
-    install('onnxruntime==1.15.1', 'onnxruntime', ignore=True)
+    install('onnxruntime==1.14.0', 'onnxruntime', ignore=True)
     if args.profile:
         print_profile(pr, 'Packages')
 
@@ -445,11 +387,11 @@ def install_repositories():
 
 # run extension installer
 def run_extension_installer(folder):
-    path_installer = os.path.realpath(os.path.join(folder, "install.py"))
+    path_installer = os.path.join(folder, "install.py")
     if not os.path.isfile(path_installer):
         return
     try:
-        log.debug(f"Running extension installer: {path_installer}")
+        log.debug(f"Running extension installer: {folder} / {path_installer}")
         env = os.environ.copy()
         env['PYTHONPATH'] = os.path.abspath(".")
         result = subprocess.run(f'"{sys.executable}" "{path_installer}"', shell=True, env=env, check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=folder)
@@ -465,21 +407,15 @@ def run_extension_installer(folder):
         log.error(f'Exception running extension installer: {e}')
 
 # get list of all enabled extensions
-def list_extensions(folder, quiet=False):
-    name = os.path.basename(folder)
-    disabled_extensions_all = opts.get('disable_all_extensions', 'none')
-    if disabled_extensions_all != 'none':
-        if not quiet:
-            log.info(f'Disabled {name}: {disabled_extensions_all}')
+def list_extensions(folder):
+    disabled_extensions = opts.get('disable_all_extensions', 'none')
+    if disabled_extensions != 'none':
+        log.debug(f'Disabled extensions: {disabled_extensions}')
         return []
-    disabled_extensions = opts.get('disabled_extensions', [])
+    disabled_extensions = set(opts.get('disabled_extensions', []))
     if len(disabled_extensions) > 0:
-        if not quiet:
-            log.info(f'Disabled {name}: {disabled_extensions}')
-    enabled_extensions = [x for x in os.listdir(folder) if x not in disabled_extensions and not x.startswith('.')]
-    if not quiet:
-        log.info(f'Enabled {name}: {enabled_extensions}')
-    return enabled_extensions
+        log.debug(f'Disabled extensions: {disabled_extensions}')
+    return [x for x in os.listdir(folder) if x not in disabled_extensions and not x.startswith('.')]
 
 
 # run installer for each installed and enabled extension and optionally update them
@@ -487,6 +423,7 @@ def install_extensions():
     if args.profile:
         pr = cProfile.Profile()
         pr.enable()
+    import pkg_resources
     pkg_resources._initialize_master_working_set() # pylint: disable=protected-access
     pkgs = [f'{p.project_name}=={p._version}' for p in pkg_resources.working_set] # pylint: disable=protected-access,not-an-iterable
     log.debug(f'Installed packages: {len(pkgs)}')
@@ -497,17 +434,17 @@ def install_extensions():
     for folder in extension_folders:
         if not os.path.isdir(folder):
             continue
-        extensions = list_extensions(folder, quiet=True)
+        extensions = list_extensions(folder)
         log.debug(f'Extensions all: {extensions}')
         for ext in extensions:
             if ext in extensions_enabled:
                 extensions_duplicates.append(ext)
                 continue
             extensions_enabled.append(ext)
-            if args.upgrade:
+            if not args.skip_update:
                 try:
                     update(os.path.join(folder, ext))
-                except Exception:
+                except:
                     log.error(f'Error updating extension: {os.path.join(folder, ext)}')
             if not args.skip_extensions:
                 run_extension_installer(os.path.join(folder, ext))
@@ -543,14 +480,14 @@ def install_submodules():
         txt = git('submodule')
         log.info('Continuing setup')
     git('submodule --quiet update --init --recursive')
-    if args.upgrade:
+    if not args.skip_update:
         log.info('Updating submodules')
         submodules = txt.splitlines()
         for submodule in submodules:
             try:
                 name = submodule.split()[1].strip()
                 update(name)
-            except Exception:
+            except:
                 log.error(f'Error updating submodule: {submodule}')
     if args.profile:
         print_profile(pr, 'Submodule')
@@ -580,7 +517,7 @@ def install_requirements():
 
 # set environment variables controling the behavior of various libraries
 def set_environment():
-    log.debug('Setting environment tuning')
+    log.info('Setting environment tuning')
     os.environ.setdefault('USE_TORCH', '1')
     os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')
     os.environ.setdefault('ACCELERATE', 'True')
@@ -597,14 +534,11 @@ def set_environment():
     os.environ.setdefault('NUMEXPR_MAX_THREADS', '16')
     os.environ.setdefault('PYTHONHTTPSVERIFY', '0')
     os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY', '1')
-    os.environ.setdefault('UVICORN_TIMEOUT_KEEP_ALIVE', '60')
     if sys.platform == 'darwin':
         os.environ.setdefault('PYTORCH_ENABLE_MPS_FALLBACK', '1')
 
 
 def check_extensions():
-    if args.quick:
-        return 0
     newest_all = os.path.getmtime('requirements.txt')
     from modules.paths_internal import extensions_builtin_dir, extensions_dir
     extension_folders = [extensions_builtin_dir] if args.safe else [extensions_builtin_dir, extensions_dir]
@@ -624,7 +558,7 @@ def check_extensions():
                 ts = os.path.getmtime(os.path.join(extension_dir, f))
                 newest = max(newest, ts)
             newest_all = max(newest_all, newest)
-            # log.debug(f'Extension version: {time.ctime(newest)} {folder}{os.pathsep}{ext}')
+            log.debug(f'Extension version: {time.ctime(newest)} {folder}{os.pathsep}{ext}')
     return round(newest_all)
 
 
@@ -633,10 +567,14 @@ def check_version(offline=False, reset=True): # pylint: disable=unused-argument
     if not os.path.exists('.git'):
         log.error('Not a git repository')
         if not args.ignore:
-            sys.exit(1)
+            exit(1)
+    # status = git('status')
+    # if 'branch' not in status:
+    #    log.error('Cannot get git repository status')
+    #    exit(1)
     ver = git('log -1 --pretty=format:"%h %ad"')
     log.info(f'Version: {ver}')
-    if args.quick or args.version or args.skip_git:
+    if args.version:
         return
     commit = git('rev-parse HEAD')
     global git_commit # pylint: disable=global-statement
@@ -674,12 +612,12 @@ def check_version(offline=False, reset=True): # pylint: disable=unused-argument
 
 
 def update_wiki():
-    if args.upgrade:
+    if not args.skip_update:
         log.info('Updating Wiki')
         try:
             update(os.path.join(os.path.dirname(__file__), "wiki"))
             update(os.path.join(os.path.dirname(__file__), "wiki", "origin-wiki"))
-        except Exception:
+        except:
             log.error('Error updating wiki')
 
 
@@ -687,8 +625,6 @@ def update_wiki():
 def check_timestamp():
     if not quick_allowed or not os.path.isfile(log_file):
         return False
-    if args.quick:
-        return True
     if args.skip_git:
         return True
     ok = True
@@ -703,7 +639,7 @@ def check_timestamp():
     except Exception as e:
         log.error(f'Error getting local repository version: {e}')
         if not args.ignore:
-            sys.exit(1)
+            exit(1)
     log.debug(f'Repository update time: {time.ctime(int(version_time))}')
     if setup_time == -1:
         return False
@@ -720,16 +656,16 @@ def check_timestamp():
     return ok
 
 
-def add_args(parser):
+def add_args():
     group = parser.add_argument_group('Setup options')
     group.add_argument('--debug', default = False, action='store_true', help = "Run installer with debug logging, default: %(default)s")
     group.add_argument('--reset', default = False, action='store_true', help = "Reset main repository to latest version, default: %(default)s")
     group.add_argument('--upgrade', default = False, action='store_true', help = "Upgrade main repository to latest version, default: %(default)s")
-    group.add_argument('--quick', default = False, action='store_true', help = "Run with startup sequence only, default: %(default)s")
     group.add_argument("--use-ipex", default = False, action='store_true', help="Use Intel OneAPI XPU backend, default: %(default)s")
     group.add_argument('--use-directml', default = False, action='store_true', help = "Use DirectML if no compatible GPU is detected, default: %(default)s")
     group.add_argument("--use-cuda", default=False, action='store_true', help="Force use nVidia CUDA backend, default: %(default)s")
     group.add_argument("--use-rocm", default=False, action='store_true', help="Force use AMD ROCm backend, default: %(default)s")
+    group.add_argument('--skip-update', default = False, action='store_true', help = "Skip update of extensions and submodules, default: %(default)s")
     group.add_argument('--skip-requirements', default = False, action='store_true', help = "Skips checking and installing requirements, default: %(default)s")
     group.add_argument('--skip-extensions', default = False, action='store_true', help = "Skips running individual extension installers, default: %(default)s")
     group.add_argument('--skip-git', default = False, action='store_true', help = "Skips running all GIT operations, default: %(default)s")
@@ -742,33 +678,38 @@ def add_args(parser):
     group.add_argument('--safe', default = False, action='store_true', help = "Run in safe mode with no user extensions")
 
 
-def parse_args(parser):
+def parse_args():
     # command line args
     global args # pylint: disable=global-statement
     args = parser.parse_args()
-    return args
 
 
-def extensions_preload(parser):
+def extensions_preload(force = False):
     if args.profile:
         pr = cProfile.Profile()
         pr.enable()
-    if args.safe:
-        log.info('Running in safe mode without user extensions')
-    try:
-        from modules.script_loading import preload_extensions
-        from modules.paths_internal import extensions_builtin_dir, extensions_dir
-        extension_folders = [extensions_builtin_dir] if args.safe else [extensions_builtin_dir, extensions_dir]
-        for ext_dir in extension_folders:
-            t0 = time.time()
-            preload_extensions(ext_dir, parser)
-            t1 = time.time()
-            log.info(f'Extension preload: {round(t1 - t0, 1)}s {ext_dir}')
-    except Exception:
-        log.error('Error running extension preloading')
+    setup_time = 0
+    if not force:
+        if os.path.isfile(log_file):
+            with open(log_file, 'r', encoding='utf8') as f:
+                lines = f.readlines()
+                for line in lines:
+                    if 'Setup complete without errors' in line:
+                        setup_time = int(line.split(' ')[-1])
+    if setup_time > 0 or force:
+        log.info('Running extension preloading')
+        if args.safe:
+            log.info('Running in safe mode without user extensions')
+        try:
+            from modules.script_loading import preload_extensions
+            from modules.paths_internal import extensions_builtin_dir, extensions_dir
+            extension_folders = [extensions_builtin_dir] if args.safe else [extensions_builtin_dir, extensions_dir]
+            for ext_dir in extension_folders:
+                preload_extensions(ext_dir, parser)
+        except:
+            log.error('Error running extension preloading')
     if args.profile:
         print_profile(pr, 'Preload')
-
 
 def git_reset():
     log.warning('Running GIT reset')
@@ -786,3 +727,43 @@ def read_options():
     if os.path.isfile(args.config):
         with open(args.config, "r", encoding="utf8") as file:
             opts = json.load(file)
+
+
+# entry method when used as module
+def run_setup():
+    # setup_logging(args.upgrade)
+    log.info('Starting SD.Next')
+    read_options()
+    check_python()
+    if args.reset:
+        git_reset()
+    if args.skip_git:
+        log.info('Skipping GIT operations')
+    check_version()
+    set_environment()
+    if args.reinstall:
+        log.info('Forcing reinstall of all packages')
+    check_torch()
+    install_requirements()
+    install_packages()
+    if check_timestamp():
+        log.info('No changes detected: Quick launch active')
+        return
+    log.info("Running setup")
+    log.debug(f"Args: {vars(args)}")
+    install_repositories()
+    install_submodules()
+    install_extensions()
+    update_wiki()
+    if errors == 0:
+        log.debug(f'Setup complete without errors: {round(time.time())}')
+    else:
+        log.warning(f'Setup complete with errors: {errors}')
+        log.warning(f'See log file for more details: {log_file}')
+
+
+if __name__ == "__main__":
+    add_args()
+    ensure_base_requirements()
+    parse_args()
+    run_setup()

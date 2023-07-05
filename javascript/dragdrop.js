@@ -68,9 +68,7 @@ window.document.addEventListener('drop', (e) => {
 window.addEventListener('paste', (e) => {
   const { files } = e.clipboardData;
   if (!isValidImageList(files)) return;
-  const visibleImageFields = [...gradioApp().querySelectorAll('[data-testid="image"]')]
-    .filter((el) => uiElementIsVisible(el))
-    .sort((a, b) => uiElementInSight(b) - uiElementInSight(a));
+  const visibleImageFields = [...gradioApp().querySelectorAll('[data-testid="image"]')].filter((el) => uiElementIsVisible(el));
   if (!visibleImageFields.length) return;
   const firstFreeImageField = visibleImageFields.filter((el) => el.querySelector('input[type=file]'))?.[0];
   dropReplaceImage(firstFreeImageField || visibleImageFields[visibleImageFields.length - 1], files);

@@ -2,9 +2,11 @@ import os
 import numpy as np
 from PIL import Image, ImageOps, ImageFilter, ImageEnhance, ImageChops, UnidentifiedImageError
 import modules.scripts
-from modules import sd_samplers, shared, processing
+from modules import sd_samplers, shared
 from modules.generation_parameters_copypaste import create_override_settings_dict
-from modules.ui import plaintext_to_html
+from modules.processing import Processed, StableDiffusionProcessingImg2Img, process_images
+from modules.ui import plaintext_to_html, infotext_to_html
+import modules.processing as processing
 from modules.memstats import memory_stats
 
 
@@ -42,14 +44,14 @@ def process_batch(p, input_dir, output_dir, inpaint_mask_dir, args):
             # try to find corresponding mask for an image using simple filename matching
             mask_image_path = os.path.join(inpaint_mask_dir, os.path.basename(image))
             # if not found use first one ("same mask for all images" use-case)
-            if mask_image_path not in inpaint_masks:
+            if not mask_image_path in inpaint_masks:
                 mask_image_path = inpaint_masks[0]
             mask_image = Image.open(mask_image_path)
             p.image_mask = mask_image
 
         proc = modules.scripts.scripts_img2img.run(p, *args)
         if proc is None:
-            proc = processing.process_images(p)
+            proc = process_images(p)
         for n, processed_image in enumerate(proc.images):
             filename = os.path.basename(image)
             if n > 0:
@@ -67,8 +69,7 @@ def img2img(id_task: str, mode: int, prompt: str, negative_prompt: str, prompt_s
 
     if shared.sd_model is None:
         shared.log.warning('Model not loaded')
-        return [], '', '', 'Error: model not loaded'
-
+        return
     if init_img is None:
         shared.log.debug('Init image not set')
 
@@ -81,25 +82,17 @@ def img2img(id_task: str, mode: int, prompt: str, negative_prompt: str, prompt_s
 
     is_batch = mode == 5
     if mode == 0:  # img2img
-        if init_img is None:
-            return
         image = init_img.convert("RGB")
         mask = None
     elif mode == 1:  # img2img sketch
-        if sketch is None:
-            return
         image = sketch.convert("RGB")
         mask = None
     elif mode == 2:  # inpaint
-        if init_img_with_mask is None:
-            return
         image, mask = init_img_with_mask["image"], init_img_with_mask["mask"]
         alpha_mask = ImageOps.invert(image.split()[-1]).convert('L').point(lambda x: 255 if x > 0 else 0, mode='1')
         mask = ImageChops.lighter(alpha_mask, mask.convert('L')).convert('L')
         image = image.convert("RGB")
     elif mode == 3:  # inpaint sketch
-        if inpaint_color_sketch is None:
-            return
         image = inpaint_color_sketch
         orig = inpaint_color_sketch_orig or inpaint_color_sketch
         pred = np.any(np.array(image) != np.array(orig), axis=-1)
@@ -109,8 +102,6 @@ def img2img(id_task: str, mode: int, prompt: str, negative_prompt: str, prompt_s
         image = Image.composite(image.filter(blur), orig, mask.filter(blur))
         image = image.convert("RGB")
     elif mode == 4:  # inpaint upload mask
-        if init_img_inpaint is None:
-            return
         image = init_img_inpaint
         mask = init_mask_inpaint
     else:
@@ -125,7 +116,7 @@ def img2img(id_task: str, mode: int, prompt: str, negative_prompt: str, prompt_s
 
     assert 0. <= denoising_strength <= 1., 'can only work with strength in [0.0, 1.0]'
 
-    p = processing.StableDiffusionProcessingImg2Img(
+    p = StableDiffusionProcessingImg2Img(
         sd_model=shared.sd_model,
         outpath_samples=shared.opts.outdir_samples or shared.opts.outdir_img2img_samples,
         outpath_grids=shared.opts.outdir_grids or shared.opts.outdir_img2img_grids,
@@ -166,12 +157,12 @@ def img2img(id_task: str, mode: int, prompt: str, negative_prompt: str, prompt_s
         p.extra_generation_params["Mask blur"] = mask_blur
     if is_batch:
         process_batch(p, img2img_batch_input_dir, img2img_batch_output_dir, img2img_batch_inpaint_mask_dir, args)
-        processed = processing.Processed(p, [], p.seed, "")
+        processed = Processed(p, [], p.seed, "")
     else:
         processed = modules.scripts.scripts_img2img.run(p, *args)
         if processed is None:
-            processed = processing.process_images(p)
+            processed = process_images(p)
     p.close()
     generation_info_js = processed.js()
     shared.log.debug(f'Processed: {len(processed.images)} Memory: {memory_stats()} img')
-    return processed.images, generation_info_js, processed.info, plaintext_to_html(processed.comments)
+    return processed.images, generation_info_js, infotext_to_html(processed.info), plaintext_to_html(processed.comments)

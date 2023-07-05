@@ -59,9 +59,9 @@ if __name__ == '__main__':
     results = {}
     times = []
     print('eager initial eval:', timed(lambda: evaluate(model, inp))[1])
-    for _i in range(N_ITERS):
+    for i in range(N_ITERS):
         inp = generate_data(16)[0]
-        _res, time = timed(lambda: evaluate(model, inp)) # noqa: B023
+        _res, time = timed(lambda: evaluate(model, inp))
         times.append(time)
     results['default'] = np.median(times)
 
@@ -71,11 +71,11 @@ if __name__ == '__main__':
             # required before changing backends
             torch._dynamo.reset() # pylint: disable=protected-access
             eval_dyn = dynamo.optimize(backend)(evaluate)
-            print('dynamo initial eval:', backend, timed(lambda: eval_dyn(model, inp))[1]) # noqa: B023
+            print('dynamo initial eval:', backend, timed(lambda: eval_dyn(model, inp))[1])
             times = []
-            for _i in range(N_ITERS):
+            for i in range(N_ITERS):
                 inp = generate_data(16)[0]
-                _res, time = timed(lambda: eval_dyn(model, inp)) # noqa: B023
+                _res, time = timed(lambda: eval_dyn(model, inp))
                 times.append(time)
             results[backend] = np.median(times)
         except Exception as err:
@@ -85,6 +85,7 @@ if __name__ == '__main__':
 
     # print stats
     print(json.dumps(results, indent = 4))
+
 
 """
 Reference: <https://github.com/pytorch/pytorch/blob/4f4b62e4a255708e928445b6502139d5962974fa/docs/source/dynamo/get-started.rst>

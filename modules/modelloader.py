@@ -9,16 +9,9 @@ from modules.paths import script_path, models_path
 
 diffuser_repos = []
 
-def load_diffusers(model_path: str, hub_url: str = None, command_path: str = None):
+def load_diffusers(model_path: str, command_path: str = None):
     import huggingface_hub as hf
-    from diffusers import DiffusionPipeline
-
     places = []
-
-    # download repo
-    if hub_url is not None:
-        DiffusionPipeline.download(hub_url, cache_dir=model_path)
-
     places.append(model_path)
     if command_path is not None and command_path != model_path and os.path.isdir(command_path):
         places.append(command_path)
@@ -79,14 +72,14 @@ def load_models(model_path: str, model_url: str = None, command_path: str = None
                 if os.path.islink(full_path) and not os.path.exists(full_path):
                     print(f"Skipping broken symlink: {full_path}")
                     continue
-                if ext_blacklist is not None and any(full_path.endswith(x) for x in ext_blacklist):
+                if ext_blacklist is not None and any([full_path.endswith(x) for x in ext_blacklist]):
                     continue
                 if full_path not in output:
                     output.append(full_path)
         if model_url is not None and len(output) == 0:
             if download_name is not None:
                 from basicsr.utils.download_util import load_file_from_url
-                dl = load_file_from_url(model_url, places[0], True, download_name)
+                dl = load_file_from_url(model_url, model_path, True, download_name)
                 output.append(dl)
             else:
                 output.append(model_url)
@@ -147,18 +140,19 @@ def move_files(src_path: str, dest_path: str, ext_filter: str = None):
                     print(f"Moving {file} from {src_path} to {dest_path}.")
                     try:
                         shutil.move(fullpath, dest_path)
-                    except Exception:
+                    except:
                         pass
             if len(os.listdir(src_path)) == 0:
                 print(f"Removing empty folder: {src_path}")
                 shutil.rmtree(src_path, True)
-    except Exception:
+    except:
         pass
 
 
 
 def load_upscalers():
-    # We can only do this 'magic' method to dynamically load upscalers if they are referenced, so we'll try to import any _model.py files before looking in __subclasses__
+    # We can only do this 'magic' method to dynamically load upscalers if they are referenced,
+    # so we'll try to import any _model.py files before looking in __subclasses__
     modules_dir = os.path.join(shared.script_path, "modules")
     for file in os.listdir(modules_dir):
         if "_model.py" in file:
@@ -166,12 +160,14 @@ def load_upscalers():
             full_model = f"modules.{model_name}_model"
             try:
                 importlib.import_module(full_model)
-            except Exception:
+            except:
                 pass
 
     datas = []
     commandline_options = vars(shared.cmd_opts)
-    # some of upscaler classes will not go away after reloading their modules, and we'll end up with two copies of those classes. The newest copy will always be the last in the list, so we go from end to beginning and ignore duplicates
+    # some of upscaler classes will not go away after reloading their modules, and we'll end
+    # up with two copies of those classes. The newest copy will always be the last in the list,
+    # so we go from end to beginning and ignore duplicates
     used_classes = {}
     for cls in reversed(Upscaler.__subclasses__()):
         classname = str(cls)
@@ -181,10 +177,7 @@ def load_upscalers():
     for cls in reversed(used_classes.values()):
         name = cls.__name__
         cmd_name = f"{name.lower().replace('upscaler', '')}_models_path"
-        commandline_model_path = commandline_options.get(cmd_name, None)
-        scaler = cls(commandline_model_path)
-        scaler.user_path = commandline_model_path
-        scaler.model_download_path = commandline_model_path or scaler.model_path
+        scaler = cls(commandline_options.get(cmd_name, None))
         datas += scaler.scalers
 
     shared.sd_upscalers = sorted(

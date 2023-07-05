@@ -1,6 +1,5 @@
-import json
 import gradio as gr
-from modules import scripts, shared, ui_common, postprocessing, call_queue
+from modules import scripts_postprocessing, scripts, shared, gfpgan_model, codeformer_model, ui_common, postprocessing, call_queue # pylint: disable=unused-import
 import modules.generation_parameters_copypaste as parameters_copypaste
 from modules.call_queue import wrap_gradio_gpu_call, wrap_queued_call, wrap_gradio_call # pylint: disable=unused-import
 from modules.extras import run_pnginfo
@@ -14,8 +13,8 @@ def wrap_pnginfo(image):
 
 def submit_click(tab_index, extras_image, image_batch, extras_batch_input_dir, extras_batch_output_dir, show_extras_results, *script_inputs):
 
-    result_images, geninfo, js_info = postprocessing.run_postprocessing(tab_index, extras_image, image_batch, extras_batch_input_dir, extras_batch_output_dir, show_extras_results, *script_inputs)
-    return result_images, geninfo, json.dumps(js_info), ''
+    result_images, geninfo, _js_info = postprocessing.run_postprocessing(tab_index, extras_image, image_batch, extras_batch_input_dir, extras_batch_output_dir, show_extras_results, *script_inputs)
+    return result_images, geninfo, '{}', ''
 
 
 def create_ui():
@@ -40,10 +39,10 @@ def create_ui():
             with gr.Row(elem_id=f"{id_part}_generate_box", elem_classes="generate-box"):
                 submit = gr.Button('Generate', elem_id=f"{id_part}_generate", variant='primary')
                 interrupt = gr.Button('Stop', elem_id=f"{id_part}_interrupt", variant='secondary')
-                interrupt.click(fn=lambda: shared.state.interrupt(), inputs=[], outputs=[])
                 skip = gr.Button('Skip', elem_id=f"{id_part}_skip", variant='secondary')
                 skip.click(fn=lambda: shared.state.skip(), inputs=[], outputs=[])
-            result_images, generation_info, html_info, html_info_formatted, html_log = ui_common.create_output_panel("extras", shared.opts.outdir_extras_samples)
+                interrupt.click(fn=lambda: shared.state.interrupt(), inputs=[], outputs=[])
+            result_images, generation_info, html_info, html_log = ui_common.create_output_panel("extras", shared.opts.outdir_extras_samples)
             gr.HTML('File metadata')
             exif_info = gr.HTML(elem_id="pnginfo_html_info")
             gen_info = gr.Text(elem_id="pnginfo_gen_info", visible=False)
@@ -57,10 +56,9 @@ def create_ui():
     extras_image.change(
         fn=wrap_gradio_call(wrap_pnginfo),
         inputs=[extras_image],
-        outputs=[_dummy, html_info_formatted, exif_info, gen_info],
+        outputs=[_dummy, html_info, exif_info, gen_info],
     )
     submit.click(
-        _js="submit_postprocessing",
         fn=call_queue.wrap_gradio_gpu_call(submit_click, extra_outputs=[None, '']),
         inputs=[
             tab_index,

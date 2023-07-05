@@ -23,9 +23,7 @@ def extract_device_id(args, name): # pylint: disable=redefined-outer-name
 
 
 def get_cuda_device_string():
-    if backend == 'ipex':
-        if shared.cmd_opts.device_id is not None:
-            return f"xpu:{shared.cmd_opts.device_id}"
+    if shared.cmd_opts.use_ipex:
         return "xpu"
     else:
         if shared.cmd_opts.device_id is not None:
@@ -34,7 +32,9 @@ def get_cuda_device_string():
 
 
 def get_optimal_device_name():
-    if (cuda_ok or backend == 'ipex') and not shared.cmd_opts.use_directml:
+    if shared.cmd_opts.use_ipex:
+        return "xpu"
+    elif cuda_ok and not shared.cmd_opts.use_directml:
         return get_cuda_device_string()
     if has_mps():
         return "mps"
@@ -64,18 +64,18 @@ def torch_gc(force=False):
     if shared.opts.disable_gc and not force:
         return
     collected = gc.collect()
-    if backend == 'ipex':
+    if shared.cmd_opts.use_ipex:
         try:
-            with torch.xpu.device(get_cuda_device_string()):
+            with torch.xpu.device("xpu"):
                 torch.xpu.empty_cache()
-        except Exception:
+        except:
             pass
     elif cuda_ok:
         try:
             with torch.cuda.device(get_cuda_device_string()):
                 torch.cuda.empty_cache()
                 torch.cuda.ipc_collect()
-        except Exception:
+        except:
             pass
     shared.log.debug(f'gc: collected={collected} device={torch.device(get_optimal_device_name())} {memstats.memory_stats()}')
 
@@ -89,23 +89,11 @@ def test_fp16():
         _y = layerNorm(x)
         shared.log.debug('Torch FP16 test passed')
         return True
-    except Exception as e:
-        shared.log.warning(f'Torch FP16 test failed: Forcing FP32 operations: {e}')
+    except:
+        shared.log.warning('Torch FP16 test failed: Forcing FP32 operations')
         shared.opts.cuda_dtype = 'FP32'
         shared.opts.no_half = True
         shared.opts.no_half_vae = True
-        return False
-
-def test_bf16():
-    if shared.cmd_opts.experimental:
-        return True
-    try:
-        import torch.nn.functional as F
-        image = torch.randn(1, 4, 32, 32).to(device=device, dtype=torch.bfloat16)
-        _out = F.interpolate(image, size=(64, 64), mode="nearest")
-        return True
-    except Exception:
-        shared.log.warning('Torch BF16 test failed: Fallback to FP16 operations')
         return False
 
 
@@ -116,7 +104,7 @@ def set_cuda_params():
             torch.backends.cuda.matmul.allow_tf32 = shared.opts.cuda_allow_tf32
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = shared.opts.cuda_allow_tf16_reduced
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = shared.opts.cuda_allow_tf16_reduced
-        except Exception:
+        except:
             pass
         if torch.backends.cudnn.is_available():
             try:
@@ -124,35 +112,28 @@ def set_cuda_params():
                 if shared.opts.cudnn_benchmark:
                     torch.backends.cudnn.benchmark_limit = 0
                 torch.backends.cudnn.allow_tf32 = shared.opts.cuda_allow_tf32
-            except Exception:
+            except:
                 pass
     global dtype, dtype_vae, dtype_unet, unet_needs_upcast # pylint: disable=global-statement
+    ok = test_fp16()
     if shared.cmd_opts.use_directml and not shared.cmd_opts.experimental: # TODO DirectML does not have full autocast capabilities
         shared.opts.no_half = True
         shared.opts.no_half_vae = True
-    if shared.opts.cuda_dtype == 'FP32':
-        dtype = torch.float32
-        dtype_vae = torch.float32
-        dtype_unet = torch.float32
-    if shared.opts.cuda_dtype == 'BF16' or dtype == torch.bfloat16:
-        bf16_ok = test_bf16()
-        dtype = torch.bfloat16 if bf16_ok else torch.float16
-        dtype_vae = torch.bfloat16 if bf16_ok else torch.float16
-        dtype_unet = torch.bfloat16 if bf16_ok else torch.float16
-    if shared.opts.cuda_dtype == 'FP16' or dtype == torch.float16:
-        fp16_ok = test_fp16()
-        dtype = torch.float16 if fp16_ok else torch.float32
-        dtype_vae = torch.float16 if fp16_ok else torch.float32
-        dtype_unet = torch.float16 if fp16_ok else torch.float32
-    else:
-        pass
-    if shared.opts.no_half:
-        shared.log.info('Torch override dtype: no-half set')
+    if ok and shared.opts.cuda_dtype == 'FP32':
+        shared.log.info('CUDA FP16 test passed but desired mode is set to FP32')
+    if shared.opts.cuda_dtype == 'FP16' and ok:
+        dtype = torch.float16
+        dtype_vae = torch.float16
+        dtype_unet = torch.float16
+    if shared.opts.cuda_dtype == 'BP16' and ok:
+        dtype = torch.bfloat16
+        dtype_vae = torch.bfloat16
+        dtype_unet = torch.bfloat16
+    if shared.opts.cuda_dtype == 'FP32' or shared.opts.no_half or not ok:
         dtype = torch.float32
         dtype_vae = torch.float32
         dtype_unet = torch.float32
     if shared.opts.no_half_vae: # set dtype again as no-half-vae options take priority
-        shared.log.info('Torch override VAE dtype: no-half set')
         dtype_vae = torch.float32
     unet_needs_upcast = shared.opts.upcast_sampling
     shared.log.debug(f'Desired Torch parameters: dtype={shared.opts.cuda_dtype} no-half={shared.opts.no_half} no-half-vae={shared.opts.no_half_vae} upscast={shared.opts.upcast_sampling}')
@@ -161,7 +142,16 @@ def set_cuda_params():
 
 
 args = cmd_args.parser.parse_args()
-if args.use_ipex or (hasattr(torch, 'xpu') and torch.xpu.is_available()):
+if args.use_ipex:
+    cpu = torch.device("xpu") #Use XPU instead of CPU. %20 Perf improvement on weak CPUs.
+else:
+    cpu = torch.device("cpu")
+device = device_interrogate = device_gfpgan = device_esrgan = device_codeformer = None
+dtype = torch.float16
+dtype_vae = torch.float16
+dtype_unet = torch.float16
+unet_needs_upcast = False
+if args.use_ipex:
     backend = 'ipex'
 elif args.use_directml:
     backend = 'directml'
@@ -174,45 +164,6 @@ elif sys.platform == 'darwin':
 else:
     backend = 'cpu'
 
-if backend == 'ipex':
-    #Fix broken function in ipex 1.13.120+xpu
-    from modules.sd_hijack_utils import CondFunc
-    #Functions with dtype errors:
-    CondFunc('torch.nn.modules.GroupNorm.forward',
-        lambda orig_func, *args, **kwargs: orig_func(args[0], args[1].to(args[0].weight.data.dtype)),
-        lambda *args, **kwargs: args[2].dtype != args[1].weight.data.dtype)
-    CondFunc('torch.nn.modules.Linear.forward',
-        lambda orig_func, *args, **kwargs: orig_func(args[0], args[1].to(args[0].weight.data.dtype)),
-        lambda *args, **kwargs: args[2].dtype != args[1].weight.data.dtype)
-    #Functions that does not work with the XPU:
-    #UniPC:
-    CondFunc('torch.linalg.solve',
-        lambda orig_func, *args, **kwargs: orig_func(args[0].to("cpu"), args[1].to("cpu")).to(get_cuda_device_string()),
-        lambda *args, **kwargs: args[1].device != torch.device("cpu"))
-    #ControlNet:
-    CondFunc('torch.batch_norm',
-        lambda orig_func, *args, **kwargs: orig_func(args[0].to("cpu"),
-        args[1].to("cpu") if args[1] is not None else args[1],
-        args[2].to("cpu") if args[2] is not None else args[2],
-        args[3].to("cpu") if args[3] is not None else args[3],
-        args[4].to("cpu") if args[4] is not None else args[4],
-        args[5], args[6], args[7], args[8]).to(get_cuda_device_string()),
-        lambda *args, **kwargs: args[1].device != torch.device("cpu"))
-    CondFunc('torch.instance_norm',
-        lambda orig_func, *args, **kwargs: orig_func(args[0].to("cpu"),
-        args[1].to("cpu") if args[1] is not None else args[1],
-        args[2].to("cpu") if args[2] is not None else args[2],
-        args[3].to("cpu") if args[3] is not None else args[3],
-        args[4].to("cpu") if args[4] is not None else args[4],
-        args[5], args[6], args[7], args[8]).to(get_cuda_device_string()),
-        lambda *args, **kwargs: args[1].device != torch.device("cpu"))
-
-cpu = torch.device("cpu")
-device = device_interrogate = device_gfpgan = device_esrgan = device_codeformer = None
-dtype = torch.float16
-dtype_vae = torch.float16
-dtype_unet = torch.float16
-unet_needs_upcast = False
 
 
 def cond_cast_unet(tensor):
@@ -225,7 +176,7 @@ def cond_cast_float(tensor):
 
 def randn(seed, shape):
     torch.manual_seed(seed)
-    if backend == 'ipex':
+    if shared.cmd_opts.use_ipex:
         torch.xpu.manual_seed_all(seed)
     if device.type == 'mps':
         return torch.randn(shape, device=cpu).to(device)
@@ -245,8 +196,8 @@ def autocast(disable=False):
         return contextlib.nullcontext()
     if shared.cmd_opts.use_directml:
         return torch.dml.amp.autocast(dtype)
-    if backend == 'ipex':
-        return torch.xpu.amp.autocast(enabled=True, dtype=dtype)
+    if shared.cmd_opts.use_ipex:
+        return torch.xpu.amp.autocast(enabled=True, dtype=dtype, cache_enabled=False)
     if cuda_ok:
         return torch.autocast("cuda")
     else:
@@ -258,7 +209,7 @@ def without_autocast(disable=False):
         return contextlib.nullcontext()
     if shared.cmd_opts.use_directml:
         return torch.dml.amp.autocast(enabled=False) if torch.is_autocast_enabled() else contextlib.nullcontext()
-    if backend == 'ipex':
+    if shared.cmd_opts.use_ipex:
         return torch.xpu.amp.autocast(enabled=False) if torch.is_autocast_enabled() else contextlib.nullcontext()
     if cuda_ok:
         return torch.autocast("cuda", enabled=False) if torch.is_autocast_enabled() else contextlib.nullcontext()

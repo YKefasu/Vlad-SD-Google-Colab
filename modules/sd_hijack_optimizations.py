@@ -1,5 +1,3 @@
-from __future__ import annotations
-import sys
 import math
 import psutil
 
@@ -21,19 +19,15 @@ if shared.opts.cross_attention_optimization == "xFormers":
         shared.xformers_available = True
     except Exception:
         pass
-else:
-    if sys.modules.get("xformers", None) is not None:
-        shared.log.debug('Unloading xFormers')
-    sys.modules["xformers"] = None
-    sys.modules["xformers.ops"] = None
 
 
 def get_available_vram():
-    if devices.backend == 'ipex':
-        stats = torch.xpu.memory_stats(shared.device)
+    if shared.cmd_opts.use_ipex:
+        stats = torch.xpu.memory_stats("xpu")
         mem_active = stats['active_bytes.all.current']
         mem_reserved = stats['reserved_bytes.all.current']
-        mem_free_xpu = torch.xpu.get_device_properties(shared.device).total_memory - torch.xpu.memory_allocated(shared.device)
+        #-128MB for the OS and other.
+        mem_free_xpu = torch.xpu.get_device_properties("xpu").total_memory - torch.xpu.memory_allocated() - (128*1024*1024)
         mem_free_torch = mem_reserved - mem_active
         mem_free_total = mem_free_xpu + mem_free_torch
         return mem_free_total
@@ -45,7 +39,7 @@ def get_available_vram():
             mem_free_cuda, _ = torch.cuda.mem_get_info(torch.cuda.current_device())
             mem_free_torch = mem_reserved - mem_active
             mem_free_total = mem_free_cuda + mem_free_torch
-        except Exception:
+        except:
             mem_free_total = 1024 * 1024 * 1024
 
         return mem_free_total
@@ -68,7 +62,7 @@ def split_cross_attention_forward_v1(self, x, context=None, mask=None): # pylint
     v_in = self.to_v(context_v)
     del context, context_k, context_v, x
 
-    q, k, v = (rearrange(t, 'b n (h d) -> (b h) n d', h=h) for t in (q_in, k_in, v_in))
+    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
     del q_in, k_in, v_in
 
     dtype = q.dtype
@@ -112,7 +106,7 @@ def split_cross_attention_forward(self, x, context=None, mask=None): # pylint: d
     with devices.without_autocast(disable=not shared.opts.upcast_attn):
         k_in = k_in * self.scale
         del context, x
-        q, k, v = (rearrange(t, 'b n (h d) -> (b h) n d', h=h) for t in (q_in, k_in, v_in))
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q_in, k_in, v_in))
         del q_in, k_in, v_in
         r1 = torch.zeros(q.shape[0], q.shape[1], v.shape[2], device=q.device, dtype=q.dtype)
         mem_free_total = get_available_vram()
@@ -190,11 +184,12 @@ def einsum_op_tensor_mem(q, k, v, max_tensor_mb):
     return einsum_op_slice_1(q, k, v, max(q.shape[1] // div, 1))
 
 def einsum_op_cuda(q, k, v):
-    if devices.backend == 'ipex':
-        stats = torch.xpu.memory_stats(q.device)
+    if shared.cmd_opts.use_ipex:
+        stats = torch.xpu.memory_stats("xpu")
         mem_active = stats['active_bytes.all.current']
         mem_reserved = stats['reserved_bytes.all.current']
-        mem_free_xpu = torch.xpu.get_device_properties(q.device).total_memory - torch.xpu.memory_allocated(q.device)
+        #-128MB for the OS and other.
+        mem_free_xpu = torch.xpu.get_device_properties("xpu").total_memory - torch.xpu.memory_allocated() - (128*1024*1024)
         mem_free_torch = mem_reserved - mem_active
         mem_free_total = mem_free_xpu + mem_free_torch
         # Divide factor of safety as there's copying and fragmentation
@@ -207,7 +202,7 @@ def einsum_op_cuda(q, k, v):
             mem_free_cuda, _ = torch.cuda.mem_get_info(q.device)
             mem_free_torch = mem_reserved - mem_active
             mem_free_total = mem_free_cuda + mem_free_torch
-        except Exception:
+        except:
             mem_free_total = 1024 * 1024 * 1024
         # Divide factor of safety as there's copying and fragmentation
         return einsum_op_tensor_mem(q, k, v, mem_free_total / 3.3 / (1 << 20))
@@ -218,7 +213,10 @@ def einsum_op_dml(q, k, v):
     return einsum_op_tensor_mem(q, k, v, (mem_reserved - mem_active) if mem_reserved > mem_active else 1)
 
 def einsum_op(q, k, v):
-    if q.device.type == 'cuda' or devices.backend == 'ipex':
+    if shared.cmd_opts.use_ipex:
+        return einsum_op_cuda(q, k, v)
+
+    if q.device.type == 'cuda':
         return einsum_op_cuda(q, k, v)
 
     if q.device.type == 'mps':
@@ -250,7 +248,7 @@ def split_cross_attention_forward_invokeAI(self, x, context=None, mask=None): # 
 
     with devices.without_autocast(disable=not shared.opts.upcast_attn):
         k = k * self.scale
-        q, k, v = (rearrange(t, 'b n (h d) -> (b h) n d', h=h) for t in (q, k, v))
+        q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> (b h) n d', h=h), (q, k, v))
         r = einsum_op(q, k, v)
     r = r.to(dtype)
     return self.to_out(rearrange(r, '(b h) n d -> b n (h d)', h=h))
@@ -317,6 +315,7 @@ def sub_quad_attention(q, k, v, q_chunk_size=1024, kv_chunk_size=None, kv_chunk_
     if chunk_threshold_bytes is not None and qk_matmul_size_bytes <= chunk_threshold_bytes:
         # the big matmul fits into our memory limit; do everything in 1 chunk,
         # i.e. send it down the unchunked fast-path
+        query_chunk_size = q_tokens # pylint: disable=unused-variable
         kv_chunk_size = k_tokens
 
     with devices.without_autocast(disable=q.dtype == v.dtype):
@@ -355,7 +354,7 @@ def xformers_attention_forward(self, x, context=None, mask=None): # pylint: disa
     k_in = self.to_k(context_k)
     v_in = self.to_v(context_v)
 
-    q, k, v = (rearrange(t, 'b n (h d) -> b n h d', h=h) for t in (q_in, k_in, v_in))
+    q, k, v = map(lambda t: rearrange(t, 'b n (h d) -> b n h d', h=h), (q_in, k_in, v_in))
     del q_in, k_in, v_in
 
     dtype = q.dtype
@@ -410,7 +409,7 @@ def scaled_dot_product_attention_forward(self, x, context=None, mask=None):
     return hidden_states
 
 def scaled_dot_product_no_mem_attention_forward(self, x, context=None, mask=None):
-    if devices.backend == 'ipex':
+    if shared.cmd_opts.use_ipex:
         with torch.backends.xpu.sdp_kernel(enable_flash=True, enable_math=True, enable_mem_efficient=False):
             return scaled_dot_product_attention_forward(self, x, context, mask)
     else:
@@ -483,7 +482,7 @@ def xformers_attnblock_forward(self, x):
         k = self.k(h_)
         v = self.v(h_)
         b, c, h, w = q.shape # pylint: disable=unused-variable
-        q, k, v = (rearrange(t, 'b c h w -> b (h w) c') for t in (q, k, v))
+        q, k, v = map(lambda t: rearrange(t, 'b c h w -> b (h w) c'), (q, k, v))
         dtype = q.dtype
         if shared.opts.upcast_attn:
             q, k = q.float(), k.float()
@@ -505,10 +504,10 @@ def sdp_attnblock_forward(self, x):
     k = self.k(h_)
     v = self.v(h_)
     b, c, h, w = q.shape # pylint: disable=unused-variable
-    q, k, v = (rearrange(t, 'b c h w -> b (h w) c') for t in (q, k, v))
+    q, k, v = map(lambda t: rearrange(t, 'b c h w -> b (h w) c'), (q, k, v))
     dtype = q.dtype
     if shared.opts.upcast_attn:
-        q, k, v = q.float(), k.float(), v.float()
+        q, k = q.float(), k.float()
     q = q.contiguous()
     k = k.contiguous()
     v = v.contiguous()
@@ -519,7 +518,7 @@ def sdp_attnblock_forward(self, x):
     return x + out
 
 def sdp_no_mem_attnblock_forward(self, x):
-    if devices.backend == 'ipex':
+    if shared.cmd_opts.use_ipex:
         with torch.backends.xpu.sdp_kernel(enable_flash=True, enable_math=True, enable_mem_efficient=False):
             return sdp_attnblock_forward(self, x)
     else:
@@ -533,7 +532,7 @@ def sub_quad_attnblock_forward(self, x):
     k = self.k(h_)
     v = self.v(h_)
     b, c, h, w = q.shape # pylint: disable=unused-variable
-    q, k, v = (rearrange(t, 'b c h w -> b (h w) c') for t in (q, k, v))
+    q, k, v = map(lambda t: rearrange(t, 'b c h w -> b (h w) c'), (q, k, v))
     q = q.contiguous()
     k = k.contiguous()
     v = v.contiguous()
