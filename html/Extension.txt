@@ -9,3 +9,4 @@ https://github.com/jexom/sd-webui-depth-lib
 https://github.com/camenduru/stable-diffusion-webui-huggingface
 https://github.com/kohya-ss/sd-webui-additional-networks
 https://github.com/zanllp/sd-webui-infinite-image-browsing
+https://github.com/Mikubill/sd-webui-controlnet
