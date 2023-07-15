@@ -4,5 +4,4 @@ https://github.com/ashen-sensored/sd_webui_SAG
 https://github.com/jexom/sd-webui-depth-lib
 https://github.com/kohya-ss/sd-webui-additional-networks
 https://github.com/zanllp/sd-webui-infinite-image-browsing
-https://github.com/Bing-su/sd-webui-tunnels
 https://github.com/Mikubill/sd-webui-controlnet/
