@@ -253,7 +253,9 @@
     "extra_networks_add_text_separator": " ",
     "extra_networks_default_multiplier": 1.0,
     "sd_hypernetwork": "None",
-    "disabled_extensions": [],
+    "disabled_extensions": [
+        "sd-webui-agent-scheduler"
+	],
     "disable_all_extensions": "none",
     "sd_checkpoint_hash": null,
     "clip_skip": 2,
