@@ -1,1 +1,1 @@
-https://github.com/hako-mikan/sd-webui-supermerger.git
+https://github.com/hako-mikan/sd-webui-supermerger
