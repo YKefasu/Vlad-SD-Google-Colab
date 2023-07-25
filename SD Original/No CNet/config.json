@@ -259,7 +259,8 @@
   "disabled_extensions": [
     "sd-webui-agent-scheduler",
     "clip-interrogator-ext",
-    "sd-extension-system-info"
+    "sd-extension-system-info",
+    "sd-webui-controlnet"
   ],
   "disable_all_extensions": "none",
   "sd_checkpoint_hash": null,

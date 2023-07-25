@@ -1,7 +1,7 @@
 {
     "sd_checkpoint_autoload": true,
     "sd_model_checkpoint": "model_sdxlv0.9.safetensors",
-    "sd_model_refiner": "None",
+    "sd_model_refiner": "refiner_model_sdxlv0.9.safetensors",
     "sd_checkpoint_cache": 0,
     "sd_vae_checkpoint_cache": 0,
     "sd_vae": "Automatic",
@@ -13,8 +13,10 @@
     "comma_padding_backtrack": 20,
     "sd_disable_ckpt": false,
     "sd_backend": "diffusers",
-    "cross_attention_optimization": "Scaled-Dot-Product",
-    "cross_attention_options": [],
+    "cross_attention_optimization": "xFormers",
+    "cross_attention_options": [
+        "xFormers enable flash Attention"
+    ],
     "sub_quad_q_chunk_size": 512,
     "sub_quad_kv_chunk_size": 512,
     "sub_quad_chunk_threshold": 80,
@@ -38,7 +40,7 @@
     "cuda_compile": false,
     "cuda_compile_mode": "none",
     "cuda_compile_fullgraph": false,
-    "cuda_compile_verbose": false,
+    "cuda_compile_verbose": true,
     "cuda_compile_errors": true,
     "disable_gc": false,
     "diffusers_allow_safetensors": true,
@@ -57,8 +59,8 @@
     "ckpt_dir": "/content/automatic/models/Stable-diffusion",
     "diffusers_dir": "/content/automatic/models/Diffusers",
     "vae_dir": "/content/automatic/models/VAE",
-    "lora_dir": "/content/automatic/models/LoRA-LyCORIS",
-    "lyco_dir": "/content/automatic/models/LoRA-LyCORIS",
+    "lora_dir": "/content/automatic/models/LyCORIS",
+    "lyco_dir": "/content/automatic/models/Lora",
     "styles_dir": "/content/automatic/styles.csv",
     "embeddings_dir": "/content/automatic/models/embeddings",
     "hypernetwork_dir": "/content/automatic/models/hypernetworks",
@@ -177,7 +179,11 @@
         "DPM2 a Karras",
         "DPM++ 2S a Karras",
         "PNDM",
-        "DDPM"
+        "DDPM",
+        "KDPM2",
+        "KDPM2 a",
+        "LMSD",
+        "Default"
     ],
     "fallback_sampler": "Euler a",
     "force_latent_sampler": "None",
@@ -194,7 +200,7 @@
     "always_discard_next_to_last_sigma": false,
     "uni_pc_variant": "bh1",
     "uni_pc_skip_type": "time_uniform",
-    "uni_pc_order": 3,
+    "uni_pc_order": 2,
     "uni_pc_lower_order_final": true,
     "postprocessing_enable_in_main_ui": [],
     "postprocessing_operation_order": [],
@@ -257,14 +263,15 @@
     "extra_networks_default_multiplier": 1.0,
     "sd_hypernetwork": "None",
     "disabled_extensions": [
+        "sd-webui-agent-scheduler",
         "sd-webui-controlnet",
+        "a1111-sd-webui-lycoris",
         "sd-dynamic-thresholding",
-        "multidiffusion-upscaler-for-automatic1111",
-        "a1111-sd-webui-lycoris"
+        "multidiffusion-upscaler-for-automatic1111"
     ],
     "disable_all_extensions": "none",
     "sd_checkpoint_hash": null,
-    "clip_skip": 1,
+    "clip_skip": 2,
     "sd_checkpoint": "model_sdxlv0.9.safetensors",
     "ldsr_steps": 100,
     "ldsr_cached": false,
@@ -411,5 +418,11 @@
     "schedulers_use_karras": true,
     "schedulers_use_loworder": true,
     "schedulers_use_thresholding": false,
-    "schedulers_dpm_solver": "sde-dpmsolver++"
+    "schedulers_dpm_solver": "sde-dpmsolver++",
+    "diffusers_refiner_latents": true,
+    "schedulers_sep_diffusers": "<h2>Diffusers specific config</h2>",
+    "schedulers_beta_start": 0.0,
+    "schedulers_beta_end": 0.0,
+    "schedulers_sep_kdiffusers": "<h2>K-Diffusion specific config</h2>",
+    "schedulers_sep_compvis": "<h2>CompVis specific config</h2>"
 }

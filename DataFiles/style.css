@@ -25,27 +25,3 @@ output gallery shall use 50% of your total screen/browser size
 #txt2img_gallery > div.grid-wrap.fixed-height, #img2img_gallery > div.grid-wrap.fixed-height {
     max-height: 100% !important;
 }
-
-#quicksettings > div, #quicksettings > fieldset {
-    max-width: none !important;
-    min-width: auto;
-}
-
-#quicksettings {
-    flex: row;
-    margin-bottom: 2em;
-}
-
-
-/* if not side-by-side-prompt */
-#txt2img_prompt_container {
-    flex-direction: column;
-    height: fit-content;
-}
-#txt2img_prompt_container>div {
-    flex: 1 0 0% !important;
-}
-
-#txt2img_actions_column {
-    flex-grow:  0;
-}
