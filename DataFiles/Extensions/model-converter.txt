@@ -1,0 +1,1 @@
+https://github.com/Akegarasu/sd-webui-model-converter
